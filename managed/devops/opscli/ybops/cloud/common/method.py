@@ -1168,7 +1168,7 @@ class ConfigureInstancesMethod(AbstractInstancesMethod):
                     logging.info("[app] Copying package {} to {} took {:.3f} sec".format(
                         args.package, args.search_pattern, time.time() - start_time))
 
-        logging.info("Configuring Instance: {}".format(args.search_pattern))
+        logging.info("[app] Configuring Instance: {}".format(args.search_pattern))
         ssh_options = {
             # TODO: replace with args.ssh_user when it's setup in the flow
             "ssh_user": self.get_ssh_user(),
@@ -1342,14 +1342,14 @@ class AccessCreateVaultMethod(AbstractVaultMethod):
             if args.vault_file is None:
                 args.vault_file = "{}.vault".format(file_prefix)
 
-            rsa_key = validated_key_file(args.private_key_file)
+            # rsa_key = validated_key_file(args.private_key_file)
         except Exception:
             self._cleanup_dir(os.path.dirname(args.private_key_file))
             raise
 
         # TODO: validate if the file provided is actually a private key file or not.
-        public_key = format_rsa_key(rsa_key, public_key=True)
-        private_key = format_rsa_key(rsa_key, public_key=False)
+        public_key = format_rsa_key(args.private_key_file, public_key=True)
+        private_key = format_rsa_key(args.private_key_file, public_key=False)
         self.cluster_vault.update(
             id_rsa=private_key,
             id_rsa_pub=public_key,

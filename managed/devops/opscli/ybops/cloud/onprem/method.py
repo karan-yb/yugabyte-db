@@ -74,7 +74,7 @@ class OnPremValidateMethod(AbstractInstancesMethod):
         """
         self.extra_vars.update(
             get_ssh_host_port({"private_ip": args.search_pattern}, args.custom_ssh_port))
-        print(validate_instance(self.extra_vars["ssh_host"],
+        print(validate_instance(args.search_pattern,
                                 self.extra_vars["ssh_port"],
                                 self.SSH_USER,
                                 args.private_key_file,
@@ -178,7 +178,7 @@ class OnPremPrecheckInstanceMethod(AbstractInstancesMethod):
             self.current_ssh_user = "yugabyte"
 
     def wait_for_host(self, args, default_port=True):
-        logging.info("Waiting for instance {}".format(args.search_pattern))
+        logging.info("[app] Waiting for instance {}".format(args.search_pattern))
         host_info = self.cloud.get_host_info(args)
         if host_info:
             self.extra_vars.update(
@@ -325,6 +325,7 @@ class OnPremPrecheckInstanceMethod(AbstractInstancesMethod):
         ansible_status = self.cloud.setup_ansible(args).run("send_sudo_pass.yml",
                                                             self.extra_vars, host_info,
                                                             print_output=False)
+        logging.info("[app] ansible o/p, {}".format(ansible_status))
         results["Try Ansible Command"] = ansible_status == 0
 
         ports_to_check = ",".join([str(p) for p in [args.master_http_port,
@@ -348,6 +349,8 @@ class OnPremPrecheckInstanceMethod(AbstractInstancesMethod):
         if args.air_gap:
             cmd += " --airgap"
 
+        logging.info("[app] Comamnd before execution, {}".format(cmd))
+
         self.update_ansible_vars_with_args(args)
         self.update_ansible_vars_with_host_info(host_info, args.custom_ssh_port)
         rc, stdout, stderr = remote_exec_command(
@@ -363,6 +366,7 @@ class OnPremPrecheckInstanceMethod(AbstractInstancesMethod):
             results.update(stdout)
 
         output = json.dumps(results, indent=2)
+        logging.info("[app] Final output, {}".format(output))
         print(output)
 
 

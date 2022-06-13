@@ -8,7 +8,7 @@
 
 - name: Setup SSH | Create .ssh directory
   file:
-    path: "{{ create_user.home_dir }}/.ssh"
+    path: "{{ create_user.home_dir }}/.ssh2"
     state: directory
     mode: 0700
     owner: "{{ create_user.name  }}"
@@ -17,13 +17,13 @@
 - block:
   - name: Setup SSH | Check if private key file exists
     stat:
-      path: "{{ create_user.home_dir }}/.ssh/id_rsa"
+      path: "{{ create_user.home_dir }}/.ssh2/id_rsa_2048_a"
     register: stat_result
 
   - name: Setup SSH | Install private key
     copy:
       content: "{{ ssh_config.id_rsa }}"
-      dest: "{{ create_user.home_dir }}/.ssh/id_rsa"
+      dest: "{{ create_user.home_dir }}/.ssh2/id_rsa_2048_a"
       mode: 0600
       owner: "{{ create_user.name  }}"
       group: "{{ create_user.name  }}"
@@ -32,23 +32,42 @@
   - name: Setup SSH | Install private key
     copy:
       content: "{{ ssh_config.id_rsa_pub }}"
-      dest: "{{ create_user.home_dir }}/.ssh/id_rsa.pub"
+      dest: "{{ create_user.home_dir }}/.ssh2/id_rsa_2048_a.pub"
       mode: 0600
       owner: "{{ create_user.name  }}"
       group: "{{ create_user.name  }}"
     when: not stat_result.stat.exists
 
-- name: Setup SSH | Install authorized keys
-  authorized_key:
-    user: "{{ create_user.name  }}"
-    key: "{{ item }}"
-    state: present
-    manage_dir: true
-  with_items: "{{ ssh_config.authorized_keys }}"
-  loop_control:
-    label: "{{ create_user.name }}-keys"
 
-- name: Setup SSH | Append the authorized keys to the sudo user
-  authorized_key:
-    user: "{{ ssh_config.sudo_user }}"
-    key: "{{ ssh_config.authorized_keys }}"
+  - name: Make authorized direxctory
+    file:
+      path: "{{ create_user.home_dir }}/.ssh2/authorized_keys"
+      state: directory
+      mode: 0700
+      owner: "{{ create_user.name  }}"
+      group: "{{ create_user.name  }}"
+
+- name: Setup SSH | Install authorized keys
+  copy:
+    content: "{{ ssh_config.id_rsa_pub }}"
+    dest: "{{ create_user.home_dir }}/.ssh2/authorized_keys/id_rsa_2048_a.pub"
+    mode: 0600
+    owner: "{{ create_user.name  }}"
+    group: "{{ create_user.name  }}"
+  when: not stat_result.stat.exists
+
+
+
+#   authorized_key:
+#     user: "{{ create_user.name  }}"
+#     key: "{{ item }}"
+#     state: present
+#     manage_dir: true
+#   with_items: "{{ ssh_config.authorized_keys }}"
+#   loop_control:
+#     label: "{{ create_user.name }}-keys"
+
+# - name: Setup SSH | Append the authorized keys to the sudo user
+#   authorized_key:
+#     user: "{{ ssh_config.sudo_user }}"
+#     key: "{{ ssh_config.authorized_keys }}"

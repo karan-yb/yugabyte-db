@@ -111,8 +111,8 @@ class AnsibleProcess(object):
             inventory_target = "localhost,"
         elif self.can_ssh:
             process_args.extend([
-                "--private-key", ssh_key_file,
-                "--user", ssh_user
+                #"--private-key", ssh_key_file,
+                "--ssh-extra-args=\"-K %s\"" % (ssh_key_file)
             ])
 
             playbook_args.update({
@@ -131,6 +131,7 @@ class AnsibleProcess(object):
         process_args.extend([
             "-i", inventory_target,
             "-c", connection_type,
+            "-u", ssh_user
         ])
 
         redacted_process_args = process_args.copy()
@@ -144,10 +145,13 @@ class AnsibleProcess(object):
             env['PROFILE_TASKS_TASK_OUTPUT_LIMIT'] = '30'
         logging.info("[app] Running ansible playbook {} against target {}".format(
                         filename, inventory_target))
-        logging.info("Running ansible command {}".format(json.dumps(redacted_process_args,
+
+        logging.info("[app] commands , {}".format(process_args))
+        logging.info("[app] Running ansible command {}".format(json.dumps(redacted_process_args,
                                                                     separators=(' ', ' '))))
         p = subprocess.Popen(process_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         stdout, stderr = p.communicate()
+        logging.info("[app] ansible o/p, {}, {}".format(stdout, stderr))
         if print_output:
             print(stdout.decode('utf-8'))
         EXCEPTION_MSG_FORMAT = ("Playbook run of {} against {} with args {} " +

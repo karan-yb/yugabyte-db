@@ -331,27 +331,43 @@ def can_ssh(host_name, port, username, ssh_key_file):
     Returns:
         (boolean): If SSH was successful or not.
     """
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file)
-    ssh_client = get_ssh_client()
-
-    try:
-        ssh_client.connect(hostname=host_name,
-                           username=username,
-                           pkey=ssh_key,
-                           port=port,
-                           timeout=SSH_TIMEOUT,
-                           banner_timeout=SSH_TIMEOUT)
-        ssh_client.invoke_shell()
-        return True
-    except (paramiko.ssh_exception.NoValidConnectionsError,
-            paramiko.ssh_exception.AuthenticationException,
-            paramiko.ssh_exception.SSHException,
-            socket.timeout,
-            socket.error,
-            EOFError):
-        return False
-    finally:
-        ssh_client.close()
+    # try:
+        # ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file)
+        # ssh_client = get_ssh_client()
+        # try:
+        #     ssh_client.connect(hostname=host_name,
+        #                     username=username,
+        #                     pkey=ssh_key,
+        #                     port=port,
+        #                     timeout=SSH_TIMEOUT,
+        #                     banner_timeout=SSH_TIMEOUT)
+        #     ssh_client.invoke_shell()
+        #     return True
+        # except (paramiko.ssh_exception.NoValidConnectionsError,
+        #         paramiko.ssh_exception.AuthenticationException,
+        #         paramiko.ssh_exception.SSHException,
+        #         socket.timeout,
+        #         socket.error,
+        #         EOFError):
+        #     return False
+        # finally:
+        #     ssh_client.close()
+    # except:
+    logging.info("[app] Trying Manual SSH in the can ssh")
+    inOutErr = run_command(
+        ['ssh',
+            '-o', 'StrictHostKeyChecking=no',
+            # Control flags here are for ssh multiplexing (reuse the same ssh connections).
+            '-K', ssh_key_file,
+            '-p', port,
+            '%s@%s' % (username, host_name),
+            'source /etc/os-release && echo "$NAME $VERSION_ID"']
+        )
+    logging.info("[app] can ssh output {}".format(inOutErr))
+    # result = inOutErr[1].readlines()
+    # if len(result) == 0 or result[0].strip().lower() != "centos linux 7":
+    #     return False
+    return True
 
 
 def get_internal_datafile_path(file_name):
@@ -485,10 +501,24 @@ def format_rsa_key(key, public_key):
     Returns:
         key (str): Encoded key in OpenSSH or PEM format based on the flag (public key or not).
     """
+    logging.info("[app], private key file here, {}".format(key))
+    # return key
     if public_key:
-        return key.publickey().exportKey("OpenSSH").decode('utf-8')
+        run_command(['ssh-keygen-g3',
+            '-D', key
+        ])
+        file = key + '.pub'
+        p_key = None
+        with open(file) as f:
+            p_key = f.read()
+        logging.info("[app] generated public key, {}".format(p_key))
+
+        return p_key
+        # return key.publickey().exportKey("OpenSSH").decode('utf-8')
     else:
-        return key.exportKey("PEM").decode('utf-8')
+        # return key.exportKey("PEM").decode('utf-8')
+        with open(key) as f:
+            return f.read()
 
 
 def validated_key_file(key_file):
@@ -500,11 +530,16 @@ def validated_key_file(key_file):
     Returns:
         key (RSA Key): RSA key data
     """
+
     if not os.path.exists(key_file):
         raise YBOpsRuntimeError("Key file {} not found.".format(key_file))
 
+    # return key_file
     with open(key_file) as f:
-        return RSA.importKey(f.read())
+        return f.read()
+    #     tmp = f.read()
+    #     print("SHUBHAM", tmp)
+        #return RSA.importKey(f.read())
 
 
 def generate_rsa_keypair(key_name, destination='/tmp'):
@@ -574,44 +609,100 @@ def validate_instance(host_name, port, username, ssh_key_file, mount_paths):
     Returns:
         (dict): return success/failure code and corresponding message (0 = success, 1-3 = failure)
     """
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file)
-    ssh_client = get_ssh_client()
+    logging.info("Trying Manual SSH")
+    inOutErr = run_command(
+        ['ssh',
+            '-o', 'StrictHostKeyChecking=no',
+            '-o', 'UserKnownHostsFile=/dev/null',
+            # Control flags here are for ssh multiplexing (reuse the same ssh connections).
+            '-o', 'ControlPersist=1m',
+            '-K', ssh_key_file,
+            '-p', port,
+            '%s@%s' % (username, host_name),
+            'source /etc/os-release && echo "$NAME $VERSION_ID"']
+        )
 
-    try:
+    result = inOutErr[1].readlines()
+    if len(result) == 0 or result[0].strip().lower() != "centos linux 7":
+        return ValidationResult.INVALID_OS
+    return ValidationResult.VALID
+    # try:
+    # ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file)
+    # ssh_client = get_ssh_client()
 
-        # Try to connect via SSH
-        ssh_client.connect(hostname=host_name,
-                           username=username,
-                           pkey=ssh_key,
-                           port=port,
-                           timeout=SSH_TIMEOUT,
-                           banner_timeout=SSH_TIMEOUT)
+    # try:
 
-        # Try to find mount paths
-        for path in [mount_path.strip() for mount_path in mount_paths]:
-            path = '"' + re.sub('[`"]', '', path) + '"'
-            stdin, stdout, stderr = ssh_client.exec_command("ls -a " + path + "")
-            if len(stderr.readlines()) > 0:
-                return ValidationResult.INVALID_MOUNT_POINTS
+    #     # Try to connect via SSH
+    #     ssh_client.connect(hostname=host_name,
+    #                        username=username,
+    #                        pkey=ssh_key,
+    #                        port=port,
+    #                        timeout=SSH_TIMEOUT,
+    #                        banner_timeout=SSH_TIMEOUT)
 
-        # Verify OS version (inOutErr = tuple(stdin, stdout, stderr))
-        inOutErr = ssh_client.exec_command("source /etc/os-release && echo \"$NAME $VERSION_ID\"")
-        result = inOutErr[1].readlines()
-        if len(result) == 0 or result[0].strip().lower() != "centos linux 7":
-            return ValidationResult.INVALID_OS
+    #     # Try to find mount paths
+    #     for path in [mount_path.strip() for mount_path in mount_paths]:
+    #         path = '"' + re.sub('[`"]', '', path) + '"'
+    #         stdin, stdout, stderr = ssh_client.exec_command("ls -a " + path + "")
+    #         if len(stderr.readlines()) > 0:
+    #             return ValidationResult.INVALID_MOUNT_POINTS
 
-        # If we get this far, then we succeeded
-        return ValidationResult.VALID
+    #     # Verify OS version (inOutErr = tuple(stdin, stdout, stderr))
+    #     inOutErr = ssh_client.exec_command("source /etc/os-release && echo \"$NAME $VERSION_ID\"")
+    #     result = inOutErr[1].readlines()
+    #     if len(result) == 0 or result[0].strip().lower() != "centos linux 7":
+    #         return ValidationResult.INVALID_OS
 
-    except paramiko.ssh_exception.AuthenticationException:
-        return ValidationResult.INVALID_SSH_KEY
-    except (paramiko.ssh_exception.NoValidConnectionsError,
-            paramiko.ssh_exception.SSHException,
-            socket.timeout):
-        return ValidationResult.UNREACHABLE
+    #     # If we get this far, then we succeeded
+    #     return ValidationResult.VALID
 
-    finally:
-        ssh_client.close()
+    # except paramiko.ssh_exception.AuthenticationException:
+    #     return ValidationResult.INVALID_SSH_KEY
+    # except (paramiko.ssh_exception.NoValidConnectionsError,
+    #         paramiko.ssh_exception.SSHException,
+    #         socket.timeout):
+    #     return ValidationResult.UNREACHABLE
+
+    # finally:
+    #     ssh_client.close()
+        
+
+def run_command(args, num_retry=1, timeout=10, env=None, **kwargs):
+    cmd_as_str = quote_cmd_line_for_bash(args)
+
+    while num_retry > 0:
+        num_retry = num_retry - 1
+
+        try:
+            proc_env = os.environ.copy()
+            proc_env.update(env if env is not None else {})
+
+            subprocess_result = str(subprocess.check_output(
+                args, stderr=subprocess.STDOUT,
+                env=proc_env, **kwargs).decode('utf-8', errors='replace'))
+            logging.info("Here is the command output, {}".format(subprocess_result))
+            return subprocess_result
+        except subprocess.CalledProcessError as e:
+            logging.error("Failed to run command [[ {} ]]: code={} output={}".format(
+                cmd_as_str, e.returncode, str(e.output.decode('utf-8', errors='replace')
+                                                        .encode("ascii", "ignore")
+                                                        .decode("ascii"))))
+            sleep_or_raise(num_retry, timeout, e)
+        except Exception as ex:
+            logging.error("Failed to run command [[ {} ]]: {}".format(cmd_as_str, ex))
+            sleep_or_raise(num_retry, timeout, ex)
+
+def sleep_or_raise(num_retry, timeout, ex):
+    if num_retry > 0:
+        logging.info("Sleep {}... ({} retries left)".format(timeout, num_retry))
+        time.sleep(timeout)
+    else:
+        raise ex
+
+def quote_cmd_line_for_bash(cmd_line):
+    if not isinstance(cmd_line, list) and not isinstance(cmd_line, tuple):
+        raise Exception("Expected a list/tuple, got: [[ {} ]]".format(cmd_line))
+    return ' '.join([pipes.quote(str(arg)) for arg in cmd_line])
 
 
 def validate_cron_status(host_name, port, username, ssh_key_file):
@@ -669,32 +760,60 @@ def remote_exec_command(host_name, port, username, ssh_key_file, cmd,
         stdout (str): output log
         stderr (str): error logs
     """
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file)
-    ssh_client = get_ssh_client()
+    logging.info("[app] Trying Manual REMOTE COMMAND EXECUTION with command, {}".format(cmd))
+    inOutErr = run_command(
+        ['ssh',
+            '-o', 'StrictHostKeyChecking=no',
+            # '-o', 'UserKnownHostsFile=/dev/null',
+            # Control flags here are for ssh multiplexing (reuse the same ssh connections).
+            # '-o', 'ControlPersist=1m',
+            '-K', ssh_key_file,
+            '-p', port,
+            '%s@%s' % (username, host_name),
+            cmd]
+        )
 
-    while retries_on_failure >= 0:
+    output = inOutErr.split('\n')
+    f_output = []
+    for out in output:
         try:
-            logging.info("Attempt #{} to execute remote command...".format(retries_on_failure + 1))
-            ssh_client.connect(hostname=host_name,
-                               username=username,
-                               pkey=ssh_key,
-                               port=port,
-                               timeout=timeout,
-                               banner_timeout=timeout)
+            json.loads(out)
+            f_output.append(out)
+        except ValueError as err:
+            logging.info("[app], invalid json, {}".format(out))
+    logging.info("[app] remote execute command {}".format(f_output))
+    if len(f_output) != 0:
+        return 0, f_output, None
+    # result = inOutErr[1].readlines()
+    # if len(result) == 0 or result[0].strip().lower() != "centos linux 7":
+    #     return ValidationResult.INVALID_OS
+    return 1, None, None
+    # ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file)
+    # ssh_client = get_ssh_client()
 
-            _, stdout, stderr = ssh_client.exec_command(cmd)
-            return stdout.channel.recv_exit_status(), stdout.readlines(), stderr.readlines()
-        except (paramiko.ssh_exception.NoValidConnectionsError,
-                paramiko.ssh_exception.AuthenticationException,
-                paramiko.ssh_exception.SSHException,
-                socket.timeout, socket.error) as e:
-            logging.error("Failed to execute remote command: {}".format(e))
-            retries_on_failure -= 1
-            time.sleep(retry_delay)
-        finally:
-            ssh_client.close()
+    # while retries_on_failure >= 0:
+    #     try:
+    #         logging.info("Attempt #{} to execute remote command...".format(retries_on_failure + 1))
+    #         ssh_client.connect(hostname=host_name,
+    #                            username=username,
+    #                            pkey=ssh_key,
+    #                            port=port,
+    #                            timeout=timeout,
+    #                            banner_timeout=timeout)
 
-    return 1, None, None  # treat this as a non-zero return code
+    #         _, stdout, stderr = ssh_client.exec_command(cmd)
+    #         return stdout.channel.recv_exit_status(), stdout.readlines(), stderr.readlines()
+    #     except (paramiko.ssh_exception.NoValidConnectionsError,
+    #             paramiko.ssh_exception.AuthenticationException,
+    #             paramiko.ssh_exception.SSHException,
+    #             socket.timeout, socket.error) as e:
+    #         logging.error("Failed to execute remote command: {}".format(e))
+    #         retries_on_failure -= 1
+    #         time.sleep(retry_delay)
+    #     finally:
+    #         ssh_client.close()
+
+    # return 1, None, None  # treat this as a non-zero return code
 
 
 def scp_to_tmp(filepath, host, user, port, private_key):
@@ -702,7 +821,7 @@ def scp_to_tmp(filepath, host, user, port, private_key):
     logging.info("[app] Copying local '{}' to remote '{}'".format(
         filepath, dest_path))
     scp_cmd = [
-        "scp", "-i", private_key, "-P", str(port), "-p",
+        "scp", "-K", private_key, "-P", str(port), "-p",
         "-o", "stricthostkeychecking=no",
         "-o", "ServerAliveInterval=30",
         "-o", "ServerAliveCountMax=20",
@@ -712,6 +831,7 @@ def scp_to_tmp(filepath, host, user, port, private_key):
         "-vvvv",
         filepath, "{}@{}:{}".format(user, host, dest_path)
     ]
+    logging.info("[app], scp command, {}".format(scp_cmd))
     # Save the debug output to temp files.
     out_fd, out_name = tempfile.mkstemp(text=True)
     err_fd, err_name = tempfile.mkstemp(text=True)
@@ -729,6 +849,7 @@ def scp_to_tmp(filepath, host, user, port, private_key):
     # Cleanup the temp files now that they are clearly not needed.
     os.remove(out_name)
     os.remove(err_name)
+    logging.info("[app], process shubham, {}".format(proc))
     return proc.returncode
 
 
