@@ -13,6 +13,16 @@
     mode: 0700
     owner: "{{ create_user.name  }}"
     group: "{{ create_user.name  }}"
+  when: ssh_type == "ssh_v2"
+
+- name: Setup SSH | Create .ssh directory
+  file:
+    path: "{{ create_user.home_dir }}/.ssh"
+    state: directory
+    mode: 0700
+    owner: "{{ create_user.name  }}"
+    group: "{{ create_user.name  }}"
+  when: ssh_type != "ssh_v2"
 
 - block:
   - name: Setup SSH | Check if private key file exists
@@ -46,28 +56,64 @@
       mode: 0700
       owner: "{{ create_user.name  }}"
       group: "{{ create_user.name  }}"
+  when: ssh_type == "ssh_v2"
+
+- block:
+  - name: Setup SSH | Check if private key file exists
+    stat:
+      path: "{{ create_user.home_dir }}/.ssh/id_rsa"
+    register: stat_result
+
+  - name: Setup SSH | Install private key
+    copy:
+      content: "{{ ssh_config.id_rsa }}"
+      dest: "{{ create_user.home_dir }}/.ssh/id_rsa"
+      mode: 0600
+      owner: "{{ create_user.name  }}"
+      group: "{{ create_user.name  }}"
+    when: not stat_result.stat.exists
+
+  - name: Setup SSH | Install private key
+    copy:
+      content: "{{ ssh_config.id_rsa_pub }}"
+      dest: "{{ create_user.home_dir }}/.ssh/id_rsa.pub"
+      mode: 0600
+      owner: "{{ create_user.name  }}"
+      group: "{{ create_user.name  }}"
+    when: not stat_result.stat.exists
+
+  when: ssh_type != "ssh_v2"
+
+- block:
+  - name: Setup SSH | Check if private key file exists
+    stat:
+      path: "{{ create_user.home_dir }}/.ssh2/id_rsa_2048_a"
+    register: stat_result
+
+  - name: Setup SSH | Install authorized keys
+    copy:
+      content: "{{ ssh_config.id_rsa_pub }}"
+      dest: "{{ create_user.home_dir }}/.ssh2/authorized_keys/id_rsa_2048_a.pub"
+      mode: 0600
+      owner: "{{ create_user.name  }}"
+      group: "{{ create_user.name  }}"
+    when: not stat_result.stat.exists
+  when: ssh_type == "ssh_v2"
+
 
 - name: Setup SSH | Install authorized keys
-  copy:
-    content: "{{ ssh_config.id_rsa_pub }}"
-    dest: "{{ create_user.home_dir }}/.ssh2/authorized_keys/id_rsa_2048_a.pub"
-    mode: 0600
-    owner: "{{ create_user.name  }}"
-    group: "{{ create_user.name  }}"
-  when: not stat_result.stat.exists
+  authorized_key:
+    user: "{{ create_user.name  }}"
+    key: "{{ item }}"
+    state: present
+    manage_dir: true
+  with_items: "{{ ssh_config.authorized_keys }}"
+  loop_control:
+    label: "{{ create_user.name }}-keys"
+  when: ssh_type != "ssh_v2"
 
-
-
-#   authorized_key:
-#     user: "{{ create_user.name  }}"
-#     key: "{{ item }}"
-#     state: present
-#     manage_dir: true
-#   with_items: "{{ ssh_config.authorized_keys }}"
-#   loop_control:
-#     label: "{{ create_user.name }}-keys"
-
-# - name: Setup SSH | Append the authorized keys to the sudo user
-#   authorized_key:
-#     user: "{{ ssh_config.sudo_user }}"
-#     key: "{{ ssh_config.authorized_keys }}"
+- name: Setup SSH | Append the authorized keys to the sudo user
+  authorized_key:
+    user: "{{ ssh_config.sudo_user }}"
+    key: "{{ ssh_config.authorized_keys }}"
+  when: ssh_type != "ssh_v2"

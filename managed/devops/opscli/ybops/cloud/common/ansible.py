@@ -16,6 +16,7 @@ import subprocess
 
 from ybops.common.exceptions import YBOpsRuntimeError
 import ybops.utils as ybutils
+from ybops.utils.ssh import parse_private_key, SSHV2, SSH
 
 
 class AnsibleProcess(object):
@@ -79,13 +80,16 @@ class AnsibleProcess(object):
         ask_sudo_pass = vars.pop("ask_sudo_pass", None)
         sudo_pass_file = vars.pop("sudo_pass_file", None)
         ssh_key_file = vars.pop("private_key_file", None)
+        # to be decided based on ssh2 binaries
+        ssh_key_type = parse_private_key(ssh_key_file)
 
         playbook_args.update(vars)
 
         if self.can_ssh:
             playbook_args.update({
                 "ssh_user": ssh_user,
-                "yb_server_ssh_user": ssh_user
+                "yb_server_ssh_user": ssh_user,
+                "ssh_type": SSH if ssh_key_type == SSH else SSHV2
             })
 
         playbook_args["yb_home_dir"] = ybutils.YB_HOME_DIR
@@ -110,10 +114,19 @@ class AnsibleProcess(object):
             connection_type = "local"
             inventory_target = "localhost,"
         elif self.can_ssh:
+            # if ssh_key_type == SSHV2:
             process_args.extend([
-                #"--private-key", ssh_key_file,
-                "--ssh-extra-args=\"-K %s\"" % (ssh_key_file)
+                "--ssh-extra-args=\"-K%s\"" % (ssh_key_file, ssh_user, ssh_host)
             ])
+            # else:
+            #      process_args.extend([
+            #         "--private-key", ssh_key_file,
+            #     ])
+
+            if ssh_user != "centos":
+                process_args.extend([
+                    "--user", ssh_user
+                ])
 
             playbook_args.update({
                 "yb_ansible_host": ssh_host,
@@ -130,8 +143,7 @@ class AnsibleProcess(object):
         # Set inventory, connection type, and pythonpath.
         process_args.extend([
             "-i", inventory_target,
-            "-c", connection_type,
-            "-u", ssh_user
+            "-c", connection_type
         ])
 
         redacted_process_args = process_args.copy()
@@ -146,8 +158,7 @@ class AnsibleProcess(object):
         logging.info("[app] Running ansible playbook {} against target {}".format(
                         filename, inventory_target))
 
-        logging.info("[app] commands , {}".format(process_args))
-        logging.info("[app] Running ansible command {}".format(json.dumps(redacted_process_args,
+        logging.info("Running ansible command {}".format(json.dumps(redacted_process_args,
                                                                     separators=(' ', ' '))))
         p = subprocess.Popen(process_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         stdout, stderr = p.communicate()

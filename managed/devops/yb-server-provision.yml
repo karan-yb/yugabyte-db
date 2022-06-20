@@ -17,7 +17,7 @@
       tags: yb-prebuilt-ami
 
 
-This is required to set locale to avoid bash warning message on GCP Ubuntu
+# This is required to set locale to avoid bash warning message on GCP Ubuntu
 - name: Install Locale on GCP Ubuntu
   hosts: "{{ yb_prebuilt_ami_host | default(instance_search_pattern) }}"
   gather_facts: yes

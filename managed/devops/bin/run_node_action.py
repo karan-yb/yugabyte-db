@@ -7,7 +7,10 @@ from pathlib import Path
 import sys
 import uuid
 import warnings
+import subprocess
+import pipes
 import logging
+import os
 
 warnings.filterwarnings("ignore")
 
@@ -40,9 +43,55 @@ def add_run_command_subparser(subparsers, command, parent):
 
 
 def handle_run_command(args, client):
-    output = client.exec_command(args.command)
+    # output = client.exec_command(args.command)
+    ssh = ['ssh',
+            '-o', 'StrictHostKeyChecking=no',
+            # Control flags here are for ssh multiplexing (reuse the same ssh connections).
+            '-K', args.key,
+            '-p', str(args.port),
+            'yugabyte@%s' % (args.ip),
+    ] + args.command
+    output = run_ssh_command(ssh)
     print('Command output:')
     print(output)
+
+def run_ssh_command(args, num_retry=1, timeout=10, env=None, **kwargs):
+    cmd_as_str = quote_cmd_line_for_bash(args)
+    logging.info("[app], running command using node action, {}".format(args))
+    while num_retry > 0:
+        num_retry = num_retry - 1
+
+        try:
+            proc_env = os.environ.copy()
+            proc_env.update(env if env is not None else {})
+
+            subprocess_result = str(subprocess.check_output(
+                args, stderr=subprocess.STDOUT,
+                env=proc_env, **kwargs).decode('utf-8', errors='replace'))
+            logging.info("[app] Here is the command output, {}".format(subprocess_result))
+            return subprocess_result
+        except subprocess.CalledProcessError as e:
+            logging.error("Failed to run command [[ {} ]]: code={} output={}".format(
+                cmd_as_str, e.returncode, str(e.output.decode('utf-8', errors='replace')
+                                                        .encode("ascii", "ignore")
+                                                        .decode("ascii"))))
+            sleep_or_raise(num_retry, timeout, e)
+        except Exception as ex:
+            logging.error("Failed to run command [[ {} ]]: {}".format(cmd_as_str, ex))
+            sleep_or_raise(num_retry, timeout, ex)
+
+def sleep_or_raise(num_retry, timeout, ex):
+    if num_retry > 0:
+        logging.info("Sleep {}... ({} retries left)".format(timeout, num_retry))
+        time.sleep(timeout)
+    else:
+        raise ex
+
+def quote_cmd_line_for_bash(cmd_line):
+    if not isinstance(cmd_line, list) and not isinstance(cmd_line, tuple):
+        raise Exception("Expected a list/tuple, got: [[ {} ]]".format(cmd_line))
+    return ' '.join([pipes.quote(str(arg)) for arg in cmd_line])
+
 
 
 def add_download_logs_subparser(subparsers, command, parent):
@@ -178,11 +227,21 @@ def add_upload_file_subparser(subparsers, command, parent):
 
 
 def upload_file_ssh(args, client):
-    sftp_client = client.get_sftp_client()
-    try:
-        sftp_client.put(args.source_file, args.target_file)
-    finally:
-        sftp_client.close()
+    # sftp_client = client.get_sftp_client()
+    sftp_client = run_ssh_command(
+        ['scp',
+            # Control flags here are for ssh multiplexing (reuse the same ssh connections).
+            '-K', args.key,
+            '-P', str(args.port),
+            args.source_file,
+            'yugabyte@%s:%s' % (args.ip, args.target_file)
+        ])
+    # try:
+    # run_ssh_command([
+    #     'put %s %s && bye', args.source_file, args.target_file
+    # ])
+    # finally:
+    #     sftp_client.close()
 
 
 def upload_file_k8s(args, client):
@@ -191,14 +250,32 @@ def upload_file_k8s(args, client):
 
 def handle_upload_file(args, client):
     target_path = Path(args.target_file)
-    client.exec_command(['mkdir', '-p', str(target_path.parent.absolute())])
+    # client.exec_command(['mkdir', '-p', str(target_path.parent.absolute())])
 
     if args.node_type == 'ssh':
+        run_ssh_command(
+        ['ssh',
+            '-o', 'StrictHostKeyChecking=no',
+            # Control flags here are for ssh multiplexing (reuse the same ssh connections).
+            '-K', args.key,
+            '-p', str(args.port),
+            'yugabyte@%s' % (args.ip),
+            'mkdir', '-p', str(target_path.parent.absolute())
+        ])
         upload_file_ssh(args, client)
     else:
         upload_file_k8s(args, client)
 
-    client.exec_command(['chmod', args.permissions, args.target_file])
+    run_ssh_command(
+    ['ssh',
+        '-o', 'StrictHostKeyChecking=no',
+        # Control flags here are for ssh multiplexing (reuse the same ssh connections).
+        '-K', args.key,
+        '-p', str(args.port),
+        'yugabyte@%s' % (args.ip),
+        'chmod', args.permissions, args.target_file
+    ])
+    # client.exec_command(['chmod', args.permissions, args.target_file])
 
 
 node_types = {
@@ -239,20 +316,21 @@ def parse_args():
 def main():
     args = parse_args()
     if args.node_type == 'ssh':
-        client = SshParamikoClient(args)
-        try:
-            client.connect()
-        except Exception as e:
-            sys.exit("Failed to establish SSH connection to {}:{} - {}"
-                     .format(args.ip, args.port, str(e)))
+        client = None
+        # SshParamikoClient(args)
+        # try:
+        #     client.connect()
+        # except Exception as e:
+        #     sys.exit("Failed to establish SSH connection to {}:{} - {}"
+        #              .format(args.ip, args.port, str(e)))
     else:
         client = KubernetesClient(args)
 
-    try:
-        actions[args.action].handler(args, client)
-    finally:
-        if args.node_type == 'ssh':
-            client.close_connection()
+    # try:
+    actions[args.action].handler(args, client)
+    # finally:
+    #     if args.node_type == 'ssh':
+    #         client.close_connection()
 
 
 if __name__ == '__main__':
