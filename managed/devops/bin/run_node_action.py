@@ -2,7 +2,7 @@
 
 import argparse
 from collections import namedtuple
-from node_client_utils import SshParamikoClient, KubernetesClient
+from node_client_utils import SshParamikoClient, KubernetesClient, YB_USERNAME
 from pathlib import Path
 import sys
 import uuid
@@ -11,6 +11,8 @@ import subprocess
 import pipes
 import logging
 import os
+import json
+from ybops.utils.ssh import check_ssh2_bin_present, _remote_exec_command, SSHV2
 
 warnings.filterwarnings("ignore")
 
@@ -43,55 +45,16 @@ def add_run_command_subparser(subparsers, command, parent):
 
 
 def handle_run_command(args, client):
-    # output = client.exec_command(args.command)
-    ssh = ['ssh',
-            '-o', 'StrictHostKeyChecking=no',
-            # Control flags here are for ssh multiplexing (reuse the same ssh connections).
-            '-K', args.key,
-            '-p', str(args.port),
-            'yugabyte@%s' % (args.ip),
-    ] + args.command
-    output = run_ssh_command(ssh)
+    if client:
+        output = client.exec_command(args.command)
+    else:
+        output = _remote_exec_command(
+            args.ip, YB_USERNAME, args.key, args.port,
+            SSHV2,
+            command=args.command
+        )
     print('Command output:')
     print(output)
-
-def run_ssh_command(args, num_retry=1, timeout=10, env=None, **kwargs):
-    cmd_as_str = quote_cmd_line_for_bash(args)
-    logging.info("[app], running command using node action, {}".format(args))
-    while num_retry > 0:
-        num_retry = num_retry - 1
-
-        try:
-            proc_env = os.environ.copy()
-            proc_env.update(env if env is not None else {})
-
-            subprocess_result = str(subprocess.check_output(
-                args, stderr=subprocess.STDOUT,
-                env=proc_env, **kwargs).decode('utf-8', errors='replace'))
-            logging.info("[app] Here is the command output, {}".format(subprocess_result))
-            return subprocess_result
-        except subprocess.CalledProcessError as e:
-            logging.error("Failed to run command [[ {} ]]: code={} output={}".format(
-                cmd_as_str, e.returncode, str(e.output.decode('utf-8', errors='replace')
-                                                        .encode("ascii", "ignore")
-                                                        .decode("ascii"))))
-            sleep_or_raise(num_retry, timeout, e)
-        except Exception as ex:
-            logging.error("Failed to run command [[ {} ]]: {}".format(cmd_as_str, ex))
-            sleep_or_raise(num_retry, timeout, ex)
-
-def sleep_or_raise(num_retry, timeout, ex):
-    if num_retry > 0:
-        logging.info("Sleep {}... ({} retries left)".format(timeout, num_retry))
-        time.sleep(timeout)
-    else:
-        raise ex
-
-def quote_cmd_line_for_bash(cmd_line):
-    if not isinstance(cmd_line, list) and not isinstance(cmd_line, tuple):
-        raise Exception("Expected a list/tuple, got: [[ {} ]]".format(cmd_line))
-    return ' '.join([pipes.quote(str(arg)) for arg in cmd_line])
-
 
 
 def add_download_logs_subparser(subparsers, command, parent):
@@ -114,14 +77,34 @@ def download_logs_ssh(args, client):
     if args.is_master:
         cmd += ['-h', '-C', args.yb_home_dir, 'master/logs/yb-master.INFO']
 
-    client.exec_command(cmd)
-    sftp_client = client.get_sftp_client()
-    try:
-        sftp_client.get(tar_file_name, args.target_local_file)
-    finally:
-        sftp_client.close()
+    rm_cmd = ['rm', tar_file_name]
+    if client:
+        client.exec_command(cmd)
+        sftp_client = client.get_sftp_client()
+        try:
+            sftp_client.get(tar_file_name, args.target_local_file)
+        finally:
+            sftp_client.close()
 
-    client.exec_command(['rm', tar_file_name])
+        client.exec_command(rm_cmd)
+    else:
+        _remote_exec_command(
+            args.ip, YB_USERNAME, args.key, args.port,
+            SSHV2,
+            command=cmd
+        )
+        _remote_exec_command(
+            args.ip, YB_USERNAME, args.key, args.port,
+            SSHV2,
+            src_filepath=tar_file_name,
+            dest_filepath=args.target_local_file,
+            get_from_remote=True
+        )
+        _remote_exec_command(
+            args.ip, YB_USERNAME, args.key, args.port,
+            SSHV2,
+            command=cmd
+        )
 
 
 def download_logs_k8s(args, client):
@@ -167,19 +150,46 @@ def download_file_ssh(args, client):
     cmd.insert(0, args.yb_home_dir)
 
     # Execute shell script on remote server and download the file to archive
-    script_output = client.exec_script("./bin/node_utils.sh", ["create_tar_file"] + cmd)
+    if client:
+        script_output = client.exec_script("./bin/node_utils.sh", ["create_tar_file"] + cmd)
+        file_exists = client.exec_script("./bin/node_utils.sh",
+                                         ["check_file_exists", tar_file_name]).strip()
+    else:
+        script_output = _remote_exec_command(
+            args.ip, YB_USERNAME, args.key, args.port,
+            SSHV2,
+            command=["./bin/node_utils.sh", "create_tar_file"] + cmd
+        )
+        file_exists = _remote_exec_command(
+            args.ip, YB_USERNAME, args.key, args.port,
+            SSHV2,
+            command=["./bin/node_utils.sh", "check_file_exists", tar_file_name]
+        ).strip()
     print(f"Shell script output : {script_output}")
 
-    check_file_exists_output = int(
-        client.exec_script("./bin/node_utils.sh", ["check_file_exists", tar_file_name]).strip())
+    check_file_exists_output = int(file_exists)
     if check_file_exists_output:
-        sftp_client = client.get_sftp_client()
-        try:
-            sftp_client.get(tar_file_name, args.target_local_file)
-        finally:
-            sftp_client.close()
-
-        client.exec_command(['rm', tar_file_name])
+        rm_cmd = ['rm', tar_file_name]
+        if client:
+            sftp_client = client.get_sftp_client()
+            try:
+                sftp_client.get(tar_file_name, args.target_local_file)
+            finally:
+                sftp_client.close()
+            client.exec_command(rm_cmd)
+        else:
+            _remote_exec_command(
+                args.ip, YB_USERNAME, args.key, args.port,
+                SSHV2,
+                src_filepath=tar_file_name,
+                dest_filepath=args.target_local_file,
+                get_from_remote=True
+            )
+            _remote_exec_command(
+                args.ip, YB_USERNAME, args.key, args.port,
+                SSHV2,
+                command=rm_cmd
+            )
 
 
 def download_file_k8s(args, client):
@@ -227,21 +237,19 @@ def add_upload_file_subparser(subparsers, command, parent):
 
 
 def upload_file_ssh(args, client):
-    # sftp_client = client.get_sftp_client()
-    sftp_client = run_ssh_command(
-        ['scp',
-            # Control flags here are for ssh multiplexing (reuse the same ssh connections).
-            '-K', args.key,
-            '-P', str(args.port),
-            args.source_file,
-            'yugabyte@%s:%s' % (args.ip, args.target_file)
-        ])
-    # try:
-    # run_ssh_command([
-    #     'put %s %s && bye', args.source_file, args.target_file
-    # ])
-    # finally:
-    #     sftp_client.close()
+    if client:
+        sftp_client = client.get_sftp_client()
+        try:
+            sftp_client.put(args.source_file, args.target_file)
+        finally:
+            sftp_client.close()
+    else:
+        output = _remote_exec_command(
+            args.ip, YB_USERNAME, args.key, args.port,
+            SSHV2,
+            src_filepath=args.source_file,
+            dest_filepath=args.target_file
+        )
 
 
 def upload_file_k8s(args, client):
@@ -249,33 +257,32 @@ def upload_file_k8s(args, client):
 
 
 def handle_upload_file(args, client):
+    logging.info("args here {}".format(args))
     target_path = Path(args.target_file)
-    # client.exec_command(['mkdir', '-p', str(target_path.parent.absolute())])
+    cmd = ['mkdir', '-p', str(target_path.parent.absolute())]
+    if client:
+        client.exec_command(cmd)
 
     if args.node_type == 'ssh':
-        run_ssh_command(
-        ['ssh',
-            '-o', 'StrictHostKeyChecking=no',
-            # Control flags here are for ssh multiplexing (reuse the same ssh connections).
-            '-K', args.key,
-            '-p', str(args.port),
-            'yugabyte@%s' % (args.ip),
-            'mkdir', '-p', str(target_path.parent.absolute())
-        ])
+        if client is None:
+            _remote_exec_command(
+                args.ip, YB_USERNAME, args.key, args.port,
+                SSHV2,
+                command=cmd
+            )
         upload_file_ssh(args, client)
     else:
         upload_file_k8s(args, client)
 
-    run_ssh_command(
-    ['ssh',
-        '-o', 'StrictHostKeyChecking=no',
-        # Control flags here are for ssh multiplexing (reuse the same ssh connections).
-        '-K', args.key,
-        '-p', str(args.port),
-        'yugabyte@%s' % (args.ip),
-        'chmod', args.permissions, args.target_file
-    ])
-    # client.exec_command(['chmod', args.permissions, args.target_file])
+    chmod_cmd = ['chmod', args.permissions, args.target_file]
+    if client:
+        client.exec_command(chmod_cmd)
+    else:
+        _remote_exec_command(
+            args.ip, YB_USERNAME, args.key, args.port,
+            SSHV2,
+            command=chmod_cmd
+        )
 
 
 node_types = {
@@ -315,22 +322,22 @@ def parse_args():
 
 def main():
     args = parse_args()
-    if args.node_type == 'ssh':
-        client = None
-        # SshParamikoClient(args)
-        # try:
-        #     client.connect()
-        # except Exception as e:
-        #     sys.exit("Failed to establish SSH connection to {}:{} - {}"
-        #              .format(args.ip, args.port, str(e)))
-    else:
+    is_ssh2_bin_present = check_ssh2_bin_present()
+    client = None
+    if args.node_type == 'ssh' and not is_ssh2_bin_present:
+        client = SshParamikoClient(args)
+        try:
+            client.connect()
+        except Exception as e:
+            sys.exit("Failed to establish SSH connection to {}:{} - {}")
+    elif args.node_type != 'ssh':
         client = KubernetesClient(args)
 
-    # try:
-    actions[args.action].handler(args, client)
-    # finally:
-    #     if args.node_type == 'ssh':
-    #         client.close_connection()
+    try:
+        actions[args.action].handler(args, client)
+    finally:
+        if args.node_type == 'ssh' and not is_ssh2_bin_present:
+            client.close_connection()
 
 
 if __name__ == '__main__':

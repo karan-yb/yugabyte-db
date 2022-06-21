@@ -35,7 +35,8 @@ from enum import Enum
 from ybops.common.colors import Colors
 from ybops.common.exceptions import YBOpsRuntimeError
 from ybops.utils.remote_shell import RemoteShell
-from ybops.utils.ssh import parse_private_key, SSH, get_ssh_client, _remote_exec_command, _run_command
+from ybops.utils.ssh import (parse_private_key, SSH, get_ssh_client,
+                             _remote_exec_command, _run_command, check_ssh2_bin_present)
 
 BLOCK_SIZE = 4096
 HOME_FOLDER = os.environ["HOME"]
@@ -325,18 +326,18 @@ def can_ssh(host_name, port, username, ssh_key_file):
         (boolean): If SSH was successful or not.
     """
     ssh_type = parse_private_key(ssh_key_file)
-    logging.info("[app], ssh key type {}".format(ssh_type))
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) if ssh_type == SSH else ssh_key_file
+    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) \
+        if ssh_type == SSH else ssh_key_file
 
     if ssh_type == SSH:
         ssh_client = get_ssh_client()
         try:
             ssh_client.connect(hostname=host_name,
-                            username=username,
-                            pkey=ssh_key,
-                            port=port,
-                            timeout=SSH_TIMEOUT,
-                            banner_timeout=SSH_TIMEOUT)
+                               username=username,
+                               pkey=ssh_key,
+                               port=port,
+                               timeout=SSH_TIMEOUT,
+                               banner_timeout=SSH_TIMEOUT)
             ssh_client.invoke_shell()
             return True
         except (paramiko.ssh_exception.NoValidConnectionsError,
@@ -349,12 +350,16 @@ def can_ssh(host_name, port, username, ssh_key_file):
         finally:
             ssh_client.close()
     else:
-        cmd = "echo 'test'"
-        out, err = _remote_exec_command(host_name, username, ssh_key, port, ssh_type, cmd)
-        out = out.splitlines()
-        if len(out) == 1 and out[0] == 'test':
-            return True
-        return False
+        try:
+            cmd = "echo 'test'"
+            out = _remote_exec_command(host_name, username, ssh_key, port,
+                                       ssh_type, command=cmd).splitlines()
+            if len(out) == 1 and out[0] == "test":
+                return True
+            return False
+        except (YBOpsRuntimeError, Exception) as e:
+            logging.error("Error Checking the instance, {}".format(e))
+            return False
 
 
 def get_internal_datafile_path(file_name):
@@ -598,18 +603,20 @@ def validate_instance(host_name, port, username, ssh_key_file, mount_paths):
     """
     ssh_type = parse_private_key(ssh_key_file)
     logging.info("[app], ssh key type {}".format(ssh_type))
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) if ssh_type == SSH else ssh_key_file
+    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) \
+        if ssh_type == SSH else ssh_key_file
+    os_check_cmd = "source /etc/os-release && echo \"$NAME $VERSION_ID\""
 
     if ssh_type == SSH:
         try:
             ssh_client = get_ssh_client()
             # Try to connect via SSH
             ssh_client.connect(hostname=host_name,
-                            username=username,
-                            pkey=ssh_key,
-                            port=port,
-                            timeout=SSH_TIMEOUT,
-                            banner_timeout=SSH_TIMEOUT)
+                               username=username,
+                               pkey=ssh_key,
+                               port=port,
+                               timeout=SSH_TIMEOUT,
+                               banner_timeout=SSH_TIMEOUT)
 
             # Try to find mount paths
             for path in [mount_path.strip() for mount_path in mount_paths]:
@@ -618,16 +625,8 @@ def validate_instance(host_name, port, username, ssh_key_file, mount_paths):
                 if len(stderr.readlines()) == 0:
                     return ValidationResult.INVALID_MOUNT_POINTS
 
-            # Try to connect via SSH
-            ssh_client.connect(hostname=host_name,
-                            username=username,
-                            pkey=ssh_key,
-                            port=port,
-                            timeout=SSH_TIMEOUT,
-                            banner_timeout=SSH_TIMEOUT)
-
             # Verify OS version (inOutErr = tuple(stdin, stdout, stderr))
-            inOutErr = ssh_client.exec_command("source /etc/os-release && echo \"$NAME $VERSION_ID\"")
+            inOutErr = ssh_client.exec_command(os_check_cmd)
             result = inOutErr[1].readlines()
             if len(result) == 0 or result[0].strip().lower() != "centos linux 7":
                 return ValidationResult.INVALID_OS
@@ -649,18 +648,19 @@ def validate_instance(host_name, port, username, ssh_key_file, mount_paths):
             for path in [mount_path.strip() for mount_path in mount_paths]:
                 path = '"' + re.sub('[`"]', '', path) + '"'
                 cmd = "ls -a " + path + ""
-                out, err = _remote_exec_command(host_name, username, ssh_key, port, ssh_type, cmd)
-                out = out.splitlines()
+                out = _remote_exec_command(host_name, username, ssh_key, port,
+                                           ssh_type, command=cmd).splitlines()
                 if len(stdout) == 0:
                     return ValidationResult.INVALID_MOUNT_POINTS
 
-            cmd = "source /etc/os-release && echo \"$NAME $VERSION_ID\""
-            out, err =  _remote_exec_command(host_name, username, ssh_key, port, ssh_type, cmd)
+            out = _remote_exec_command(host_name, username, ssh_key, port,
+                                       ssh_type, command=os_check_cmd).splitlines()
             if len(out) == 0 or out[0].strip().lower() != "centos linux 7":
                 return ValidationResult.INVALID_OS
             return ValidationResult.VALID
-        except Exception as e:
+        except (YBOpsRuntimeError, Exception) as e:
             logging.error("Failed to execute remote command: {}".format(e))
+            return ValidationResult.UNREACHABLE
 
 
 def validate_cron_status(host_name, port, username, ssh_key_file):
@@ -677,7 +677,8 @@ def validate_cron_status(host_name, port, username, ssh_key_file):
     """
     ssh_type = parse_private_key(ssh_key_file)
     logging.info("[app], ssh key type {}".format(ssh_type))
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) if ssh_type == SSH else ssh_key_file
+    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) \
+        if ssh_type == SSH else ssh_key_file
 
     if ssh_key == SSH:
         ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file)
@@ -685,11 +686,11 @@ def validate_cron_status(host_name, port, username, ssh_key_file):
         try:
             # Try to connect via SSH
             ssh_client.connect(hostname=host_name,
-                            username=username,
-                            pkey=ssh_key,
-                            port=port,
-                            timeout=SSH_TIMEOUT,
-                            banner_timeout=SSH_TIMEOUT)
+                               username=username,
+                               pkey=ssh_key,
+                               port=port,
+                               timeout=SSH_TIMEOUT,
+                               banner_timeout=SSH_TIMEOUT)
 
             _, stdout, stderr = ssh_client.exec_command("crontab -l")
             cronjobs = ["clean_cores.sh", "zip_purge_yb_logs.sh", "yb-server-ctl.sh tserver"]
@@ -706,14 +707,13 @@ def validate_cron_status(host_name, port, username, ssh_key_file):
     else:
         try:
             cmd = "crontab -l"
-            out, err = _remote_exec_command(host_name, username, ssh_key, port, ssh_type, cmd)
-            out = out.splitlines()
+            out = _remote_exec_command(host_name, username, ssh_key, port,
+                                       ssh_type, command=cmd).splitlines()
             cronjobs = ["clean_cores.sh", "zip_purge_yb_logs.sh", "yb-server-ctl.sh tserver"]
             return len(out) != 0 and all(c in out for c in cronjobs)
-        except Exception as e:
-            logging.error("Failed to execute remote command: {}".format(e))
-            retries_on_failure -= 1
-            time.sleep(retry_delay)
+        except (YBOpsRuntimeError, Exception) as e:
+            logging.error("Failed to validate cronjobs: {}".format(e))
+            return False
 
 
 def remote_exec_command(host_name, port, username, ssh_key_file, cmd,
@@ -734,19 +734,20 @@ def remote_exec_command(host_name, port, username, ssh_key_file, cmd,
         stderr (str): error logs
     """
     ssh_type = parse_private_key(ssh_key_file)
-    logging.info("[app], ssh key type {}".format(ssh_type))
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) if ssh_type == SSH else ssh_key_file
+    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) \
+        if ssh_type == SSH else ssh_key_file
     while retries_on_failure >= 0:
-        logging.info("[app] Attempt #{} to execute remote command...".format(retries_on_failure + 1))
+        logging.info("[app] Attempt #{} to execute remote command..."
+                     .format(retries_on_failure + 1))
         if ssh_type == SSH:
             try:
                 ssh_client = get_ssh_client()
                 ssh_client.connect(hostname=host_name,
-                                username=username,
-                                pkey=ssh_key,
-                                port=port,
-                                timeout=timeout,
-                                banner_timeout=timeout)
+                                   username=username,
+                                   pkey=ssh_key,
+                                   port=port,
+                                   timeout=timeout,
+                                   banner_timeout=timeout)
 
                 _, stdout, stderr = ssh_client.exec_command(cmd)
                 return stdout.channel.recv_exit_status(), stdout.readlines(), stderr.readlines()
@@ -761,13 +762,11 @@ def remote_exec_command(host_name, port, username, ssh_key_file, cmd,
                 ssh_client.close()
         else:
             try:
-                out = _remote_exec_command(host_name, username, ssh_key, port, ssh_type, cmd)
-                out = out.splitlines()
-                err = err.splitlines()
-                logging.info("[app], trying out manual remote execution {}".format(out))
-                return 0, out, err
-            except Exception as e:
-                logging.error("Failed to execute remote command: {}".format(str(e)))
+                out = _remote_exec_command(host_name, username, ssh_key, port,
+                                           ssh_type, command=cmd).splitlines()
+                return 0, out, None
+            except (YBOpsRuntimeError, Exception) as e:
+                logging.error("Failed to execute remote command: {}".format(e))
                 retries_on_failure -= 1
                 time.sleep(retry_delay)
 
@@ -778,12 +777,12 @@ def scp_to_tmp(filepath, host, user, port, private_key):
     dest_path = os.path.join("/tmp", os.path.basename(filepath))
     logging.info("[app] Copying local '{}' to remote '{}'".format(
         filepath, dest_path))
-    # key_type = parse_private_key(private_key)
-    # ssh_key_flag = '-K'
-    # if key_type == SSH:
-    #     ssh_key_flag = '-i'
+    ssh2_bin_present = check_ssh2_bin_present()
+    ssh_key_flag = '-K'
+    if not ssh2_bin_present:
+        ssh_key_flag = '-i'
     scp_cmd = [
-        "scp", "-K", private_key, "-P", str(port), "-p",
+        "scp", ssh_key_flag, private_key, "-P", str(port), "-p",
         "-o", "stricthostkeychecking=no",
         "-o", "ServerAliveInterval=30",
         "-o", "ServerAliveCountMax=20",
@@ -793,7 +792,6 @@ def scp_to_tmp(filepath, host, user, port, private_key):
         "-vvvv",
         filepath, "{}@{}:{}".format(user, host, dest_path)
     ]
-    logging.info("[app], scp command, {}".format(scp_cmd))
     # Save the debug output to temp files.
     out_fd, out_name = tempfile.mkstemp(text=True)
     err_fd, err_name = tempfile.mkstemp(text=True)
@@ -811,7 +809,6 @@ def scp_to_tmp(filepath, host, user, port, private_key):
     # Cleanup the temp files now that they are clearly not needed.
     os.remove(out_name)
     os.remove(err_name)
-    logging.info("[app], process shubham, {}".format(proc.returncode))
     return proc.returncode
 
 

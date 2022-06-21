@@ -10,8 +10,6 @@ import com.yugabyte.yw.common.NodeManager;
 import com.yugabyte.yw.common.ShellResponse;
 import javax.inject.Inject;
 import play.libs.Json;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class PrecheckNodeDetached extends AbstractTaskBase {
 
@@ -33,14 +31,11 @@ public class PrecheckNodeDetached extends AbstractTaskBase {
     return (DetachedNodeTaskParams) taskParams;
   }
 
-  public static final Logger LOG = LoggerFactory.getLogger(PrecheckNodeDetached.class);
-
   @Override
   public void run() {
     ShellResponse response =
         getNodeManager().detachedNodeCommand(NodeManager.NodeCommandType.Precheck, taskParams());
 
-    LOG.info("SHUBHAM detached node o/p, {}", response);
     if (response.code == 0) {
       JsonNode responseJson = Json.parse(response.message);
       for (JsonNode node : responseJson) {

@@ -7,7 +7,7 @@
 # https://github.com/YugaByte/yugabyte-db/blob/master/licenses/POLYFORM-FREE-TRIAL-LICENSE-1.0.0.txt
 
 - debug:
-    msg: "Creating user {{ create_user.name }} (group: {{ create_user.group|default('no group') }}), Public key {{ ssh_config.id_rsa_pub }}"
+    msg: "Creating user {{ create_user.name }} (group: {{ create_user.group|default('no group') }})"
 
 # Don't make the user a "system user" by default on Mac OS X to avoid the following error:
 # "Could not write domain /Library/Preferences/com.apple.loginwindow.plist".

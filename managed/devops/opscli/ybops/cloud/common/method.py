@@ -1168,7 +1168,7 @@ class ConfigureInstancesMethod(AbstractInstancesMethod):
                     logging.info("[app] Copying package {} to {} took {:.3f} sec".format(
                         args.package, args.search_pattern, time.time() - start_time))
 
-        logging.info("[app] Configuring Instance: {}".format(args.search_pattern))
+        logging.info("Configuring Instance: {}".format(args.search_pattern))
         ssh_options = {
             # TODO: replace with args.ssh_user when it's setup in the flow
             "ssh_user": self.get_ssh_user(),

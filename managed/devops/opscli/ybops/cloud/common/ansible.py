@@ -16,7 +16,7 @@ import subprocess
 
 from ybops.common.exceptions import YBOpsRuntimeError
 import ybops.utils as ybutils
-from ybops.utils.ssh import parse_private_key, SSHV2, SSH
+from ybops.utils.ssh import check_ssh2_bin_present, SSH, SSHV2
 
 
 class AnsibleProcess(object):
@@ -80,8 +80,7 @@ class AnsibleProcess(object):
         ask_sudo_pass = vars.pop("ask_sudo_pass", None)
         sudo_pass_file = vars.pop("sudo_pass_file", None)
         ssh_key_file = vars.pop("private_key_file", None)
-        # to be decided based on ssh2 binaries
-        ssh_key_type = parse_private_key(ssh_key_file)
+        ssh2_bin_present = check_ssh2_bin_present()
 
         playbook_args.update(vars)
 
@@ -89,7 +88,7 @@ class AnsibleProcess(object):
             playbook_args.update({
                 "ssh_user": ssh_user,
                 "yb_server_ssh_user": ssh_user,
-                "ssh_type": SSH if ssh_key_type == SSH else SSHV2
+                "ssh_type": SSH if not ssh2_bin_present else SSHV2
             })
 
         playbook_args["yb_home_dir"] = ybutils.YB_HOME_DIR
@@ -114,16 +113,17 @@ class AnsibleProcess(object):
             connection_type = "local"
             inventory_target = "localhost,"
         elif self.can_ssh:
-            # if ssh_key_type == SSHV2:
-            process_args.extend([
-                "--ssh-extra-args=\"-K%s\"" % (ssh_key_file, ssh_user, ssh_host)
-            ])
-            # else:
-            #      process_args.extend([
-            #         "--private-key", ssh_key_file,
-            #     ])
+            if ssh2_bin_present:
+                process_args.extend([
+                    "--ssh-extra-args=\"-K%s\"" % (ssh_key_file)
+                ])
+            else:
+                process_args.extend([
+                    "--private-key", ssh_key_file,
+                ])
 
-            if ssh_user != "centos":
+            # Hack for ssh-2 server, treats as reserved words
+            if ssh_user != "centos" and not ssh2_bin_present:
                 process_args.extend([
                     "--user", ssh_user
                 ])
@@ -162,7 +162,6 @@ class AnsibleProcess(object):
                                                                     separators=(' ', ' '))))
         p = subprocess.Popen(process_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         stdout, stderr = p.communicate()
-        logging.info("[app] ansible o/p, {}, {}".format(stdout, stderr))
         if print_output:
             print(stdout.decode('utf-8'))
         EXCEPTION_MSG_FORMAT = ("Playbook run of {} against {} with args {} " +
