@@ -11,7 +11,6 @@
 from __future__ import print_function
 
 import distro
-import datetime
 import json
 import logging
 import os
@@ -20,14 +19,12 @@ import pipes
 import platform
 import random
 import re
-import shutil
 import socket
 import string
 import stat
 import subprocess
 import sys
 import time
-import tempfile
 
 from Crypto.PublicKey import RSA
 from enum import Enum
@@ -36,21 +33,13 @@ from ybops.common.colors import Colors
 from ybops.common.exceptions import YBOpsRuntimeError
 from ybops.utils.remote_shell import RemoteShell
 from ybops.utils.ssh import (parse_private_key, SSH, get_ssh_client,
-                             _remote_exec_command, _run_command, check_ssh2_bin_present)
+                             _remote_exec_command, _run_command, check_ssh2_bin_present,
+                             SSH_TIMEOUT, SSH_RETRY_DELAY)
 
 BLOCK_SIZE = 4096
 HOME_FOLDER = os.environ["HOME"]
 YB_FOLDER_PATH = os.path.join(HOME_FOLDER, ".yugabyte")
-SSH_RETRY_LIMIT = 60
-SSH_RETRY_LIMIT_PRECHECK = 4
-DEFAULT_SSH_PORT = 22
-DEFAULT_SSH_USER = 'centos'
-# Timeout in seconds.
-SSH_TIMEOUT = 45
-# Retry in seconds
-SSH_RETRY_DELAY = 10
 
-RSA_KEY_LENGTH = 2048
 RELEASE_VERSION_FILENAME = "version.txt"
 RELEASE_VERSION_PATTERN = "\d+.\d+.\d+.\d+"
 RELEASE_REPOS = set(["devops", "yugaware", "yugabyte"])
@@ -314,54 +303,6 @@ def get_checksum(file_path, hasher):
         return hasher.hexdigest()
 
 
-def can_ssh(host_name, port, username, ssh_key_file):
-    """This method tries to ssh to the host with the username provided on the port.
-    and returns if ssh was successful or not.
-    Args:
-        host_name (str): SSH host IP address
-        port (int): SSH port
-        username (str): SSH username
-        ssh_key_file (str): SSH key file
-    Returns:
-        (boolean): If SSH was successful or not.
-    """
-    ssh_type = parse_private_key(ssh_key_file)
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) \
-        if ssh_type == SSH else ssh_key_file
-
-    if ssh_type == SSH:
-        ssh_client = get_ssh_client()
-        try:
-            ssh_client.connect(hostname=host_name,
-                               username=username,
-                               pkey=ssh_key,
-                               port=port,
-                               timeout=SSH_TIMEOUT,
-                               banner_timeout=SSH_TIMEOUT)
-            ssh_client.invoke_shell()
-            return True
-        except (paramiko.ssh_exception.NoValidConnectionsError,
-                paramiko.ssh_exception.AuthenticationException,
-                paramiko.ssh_exception.SSHException,
-                socket.timeout,
-                socket.error,
-                EOFError):
-            return False
-        finally:
-            ssh_client.close()
-    else:
-        try:
-            cmd = "echo 'test'"
-            out = _remote_exec_command(host_name, username, ssh_key, port,
-                                       ssh_type, command=cmd).splitlines()
-            if len(out) == 1 and out[0] == "test":
-                return True
-            return False
-        except (YBOpsRuntimeError, Exception) as e:
-            logging.error("Error Checking the instance, {}".format(e))
-            return False
-
-
 def get_internal_datafile_path(file_name):
     """This method returns the data file path, based on where
     the package is installed, for an internal metadata file.
@@ -440,129 +381,6 @@ def is_valid_ip_address(ip_addr):
         return True
     except (socket.error, TypeError):
         return False
-
-
-def get_ssh_host_port(host_info, custom_port, default_port=False):
-    """This method would return ssh_host and port which we should use for ansible. If host_info
-    includes a ssh_port key, then we return its value. Otherwise, if the default_port param is
-    True, then we return a Default SSH port (22) else, we return a custom ssh port.
-    Args:
-        host_info (dict): host_info dictionary that we fetched from inventory script, we
-                          fetch the private_ip from that.
-        default_port(boolean): Boolean to denote if we want to use default ssh port or not.
-    Returns:
-        (dict): a dictionary with ssh_port and ssh_host data.
-    """
-    ssh_port = host_info.get("ssh_port")
-    if ssh_port is None:
-        ssh_port = (DEFAULT_SSH_PORT if default_port else custom_port)
-    return {
-        "ssh_port": ssh_port,
-        "ssh_host": host_info["private_ip"]
-    }
-
-
-def wait_for_ssh(host_ip, ssh_port, ssh_user, ssh_key, num_retries=SSH_RETRY_LIMIT):
-    """This method would basically wait for the given host's ssh to come up, by looping
-    and checking if the ssh is active. And timesout if retries reaches num_retries.
-    Args:
-        host_ip (str): IP Address for which we want to ssh
-        ssh_port (str): ssh port
-        ssh_user (str): ssh user name
-        ssh_key (str): ssh key filename
-    Returns:
-        (boolean): Returns true if the ssh was successful.
-    """
-    retry_count = 0
-    while retry_count < num_retries:
-        if can_ssh(host_ip, ssh_port, ssh_user, ssh_key):
-            return True
-
-        time.sleep(1)
-        retry_count += 1
-
-    return False
-
-
-def format_rsa_key(key, public_key=False, key_type=SSH):
-    """This method would take the rsa key and format it based on whether it is
-    public key or private key.
-    Args:
-        key (RSA Key): Key data
-        public_key (bool): Denotes if we need public key or not.
-    Returns:
-        key (str): Encoded key in OpenSSH or PEM format based on the flag (public key or not).
-    """
-    if key_type == SSH:
-        if public_key:
-            return key.publickey().exportKey("OpenSSH").decode('utf-8')
-        return key.exportKey("PEM").decode('utf-8')
-    else:
-        if public_key:
-            _run_command(['ssh-keygen-g3', '-D', key])
-            file = key + '.pub'
-            p_key = None
-            with open(file) as f:
-                p_key = f.read()
-            logging.info("generating public key, {}".format(p_key))
-
-            return p_key
-        else:
-            with open(key) as f:
-                return f.read()
-
-
-def validated_key_file(key_file):
-    """This method would validate a given key file and raise a exception if the file format
-    is incorrect or not found.
-    Args:
-        key_file (str): Key file name
-        public_key (bool): Denote if the key file is public key or not.
-    Returns:
-        key (RSA Key): RSA key data
-    """
-
-    if not os.path.exists(key_file):
-        raise YBOpsRuntimeError("Key file {} not found.".format(key_file))
-
-    ssh_type = parse_private_key(key_file)
-    logging.info("[app], ssh key type {}".format(ssh_type))
-    if ssh_type == SSH:
-        with open(key_file) as f:
-            return RSA.importKey(f.read()), ssh_type
-    else:
-        return key_file, ssh_type
-
-
-def generate_rsa_keypair(key_name, destination='/tmp'):
-    """This method would generate a RSA Keypair with an exponent of 65537 in PEM format,
-    We will also make the files once generated READONLY by owner, this is need for SSH
-    to work.
-    Args:
-        key_name(str): Keypair name
-        destination (str): Destination folder
-    Returns:
-        keys (tuple): Private and Public key files.
-    """
-    new_key = RSA.generate(RSA_KEY_LENGTH)
-    if not os.path.exists(destination):
-        raise YBOpsRuntimeError("Destination folder {} not accessible".format(destination))
-
-    public_key_filename = os.path.join(destination, "{}.pub".format(key_name))
-    private_key_filename = os.path.join(destination, "{}.pem".format(key_name))
-    if os.path.exists(public_key_filename):
-        raise YBOpsRuntimeError("Public key file {} already exists".format(public_key_filename))
-    if os.path.exists(private_key_filename):
-        raise YBOpsRuntimeError("Private key file {} already exists".format(private_key_filename))
-
-    with open(public_key_filename, "w") as f:
-        f.write(format_rsa_key(new_key, public_key=True))
-        os.chmod(f.name, stat.S_IRUSR)
-    with open(private_key_filename, "w") as f:
-        f.write(format_rsa_key(new_key, public_key=False))
-        os.chmod(f.name, stat.S_IRUSR)
-
-    return private_key_filename, public_key_filename
 
 
 def generate_random_password(size=32):
@@ -773,45 +591,6 @@ def remote_exec_command(host_name, port, username, ssh_key_file, cmd,
     return 1, None, None  # treat this as a non-zero return code
 
 
-def scp_to_tmp(filepath, host, user, port, private_key):
-    dest_path = os.path.join("/tmp", os.path.basename(filepath))
-    logging.info("[app] Copying local '{}' to remote '{}'".format(
-        filepath, dest_path))
-    ssh2_bin_present = check_ssh2_bin_present()
-    ssh_key_flag = '-K'
-    if not ssh2_bin_present:
-        ssh_key_flag = '-i'
-    scp_cmd = [
-        "scp", ssh_key_flag, private_key, "-P", str(port), "-p",
-        "-o", "stricthostkeychecking=no",
-        "-o", "ServerAliveInterval=30",
-        "-o", "ServerAliveCountMax=20",
-        "-o", "ControlMaster=auto",
-        "-o", "ControlPersist=600s",
-        "-o", "IPQoS=throughput",
-        "-vvvv",
-        filepath, "{}@{}:{}".format(user, host, dest_path)
-    ]
-    # Save the debug output to temp files.
-    out_fd, out_name = tempfile.mkstemp(text=True)
-    err_fd, err_name = tempfile.mkstemp(text=True)
-    # Start the scp and redirect out and err.
-    proc = subprocess.Popen(scp_cmd, stdout=out_fd, stderr=err_fd)
-    # Wait for finish and cleanup FDs.
-    proc.wait()
-    os.close(out_fd)
-    os.close(err_fd)
-    # In case of errors, copy over the tmp output.
-    if proc.returncode != 0:
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        shutil.copyfile(out_name, "/tmp/{}-{}.out".format(host, timestamp))
-        shutil.copyfile(err_name, "/tmp/{}-{}.err".format(host, timestamp))
-    # Cleanup the temp files now that they are clearly not needed.
-    os.remove(out_name)
-    os.remove(err_name)
-    return proc.returncode
-
-
 def get_or_create(getter):
     """This decorator would basically return a instance if already exists based on
     the getter method, if not it will call the create method to create new and returns."""
@@ -886,9 +665,3 @@ def get_mount_roots(ssh_options, paths):
     return ",".join(
         [mroot.strip() for mroot in mount_roots if mroot.strip()]
     )
-
-
-def get_public_key_content(private_key_file):
-    rsa_key = validated_key_file(private_key_file)
-    public_key_content = format_rsa_key(rsa_key, public_key=True)
-    return public_key_content

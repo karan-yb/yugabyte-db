@@ -16,7 +16,7 @@ import subprocess
 
 from ybops.common.exceptions import YBOpsRuntimeError
 import ybops.utils as ybutils
-from ybops.utils.ssh import check_ssh2_bin_present, SSH, SSHV2
+from ybops.utils.ssh import check_ssh2_bin_present, SSH, SSHV2, parse_private_key
 
 
 class AnsibleProcess(object):
@@ -81,6 +81,7 @@ class AnsibleProcess(object):
         sudo_pass_file = vars.pop("sudo_pass_file", None)
         ssh_key_file = vars.pop("private_key_file", None)
         ssh2_bin_present = check_ssh2_bin_present()
+        ssh_key_type = parse_private_key(ssh_key_file)
 
         playbook_args.update(vars)
 
@@ -88,7 +89,7 @@ class AnsibleProcess(object):
             playbook_args.update({
                 "ssh_user": ssh_user,
                 "yb_server_ssh_user": ssh_user,
-                "ssh_type": SSH if not ssh2_bin_present else SSHV2
+                "ssh_type": SSH if ssh_key_type == SSH else SSHV2
             })
 
         playbook_args["yb_home_dir"] = ybutils.YB_HOME_DIR

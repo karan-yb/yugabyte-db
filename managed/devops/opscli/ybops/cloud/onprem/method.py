@@ -15,12 +15,13 @@ from ybops.cloud.common.method import AbstractInstancesMethod
 from ybops.cloud.common.method import CreateInstancesMethod
 from ybops.cloud.common.method import DestroyInstancesMethod
 from ybops.cloud.common.method import ProvisionInstancesMethod, ListInstancesMethod
-from ybops.utils import get_ssh_host_port, validate_instance, get_datafile_path, YB_HOME_DIR, \
-                        get_mount_roots, remote_exec_command, wait_for_ssh, scp_to_tmp, \
-                        SSH_RETRY_LIMIT_PRECHECK, DEFAULT_MASTER_HTTP_PORT, \
+from ybops.utils import validate_instance, get_datafile_path, YB_HOME_DIR, \
+                        get_mount_roots, remote_exec_command, \
+                        DEFAULT_MASTER_HTTP_PORT, \
                         DEFAULT_MASTER_RPC_PORT, DEFAULT_TSERVER_HTTP_PORT, \
                         DEFAULT_TSERVER_RPC_PORT, DEFAULT_NODE_EXPORTER_HTTP_PORT
 from ybops.utils.remote_shell import RemoteShell
+from ybops.utils.ssh import wait_for_ssh, scp_to_tmp, get_ssh_host_port, SSH_RETRY_LIMIT_PRECHECK
 
 import json
 import logging

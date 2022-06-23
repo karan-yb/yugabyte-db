@@ -103,7 +103,7 @@ def download_logs_ssh(args, client):
         _remote_exec_command(
             args.ip, YB_USERNAME, args.key, args.port,
             SSHV2,
-            command=cmd
+            command=rm_cmd
         )
 
 

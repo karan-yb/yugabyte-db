@@ -49,7 +49,7 @@
     when: not stat_result.stat.exists
 
 
-  - name: Make authorized direxctory
+  - name: Make authorized directory
     file:
       path: "{{ create_user.home_dir }}/.ssh2/authorized_keys"
       state: directory

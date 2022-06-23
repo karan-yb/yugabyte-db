@@ -21,9 +21,9 @@ import yaml
 from ybops.cloud.common.ansible import AnsibleProcess
 from ybops.cloud.common.base import AbstractCommandParser
 from ybops.utils import (YB_HOME_DIR, YBOpsRuntimeError, get_datafile_path,
-                         get_internal_datafile_path, get_ssh_host_port, remote_exec_command,
-                         scp_to_tmp, wait_for_ssh)
+                         get_internal_datafile_path, remote_exec_command)
 from ybops.utils.remote_shell import RemoteShell
+from ybops.utils.ssh import wait_for_ssh, scp_to_tmp, get_ssh_host_port
 
 
 class AbstractCloud(AbstractCommandParser):

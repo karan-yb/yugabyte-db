@@ -21,14 +21,14 @@ import time
 
 from pprint import pprint
 from ybops.common.exceptions import YBOpsRuntimeError
-from ybops.utils import get_ssh_host_port, wait_for_ssh, get_path_from_yb, \
-    generate_random_password, validated_key_file, format_rsa_key, validate_cron_status, \
-    get_public_key_content, \
+from ybops.utils import get_path_from_yb, \
+    generate_random_password, validate_cron_status, \
     YB_SUDO_PASS, DEFAULT_MASTER_HTTP_PORT, DEFAULT_MASTER_RPC_PORT, DEFAULT_TSERVER_HTTP_PORT, \
-    DEFAULT_TSERVER_RPC_PORT, DEFAULT_CQL_PROXY_RPC_PORT, DEFAULT_REDIS_PROXY_RPC_PORT, \
-    DEFAULT_SSH_USER
+    DEFAULT_TSERVER_RPC_PORT, DEFAULT_CQL_PROXY_RPC_PORT, DEFAULT_REDIS_PROXY_RPC_PORT
 from ansible_vault import Vault
-from ybops.utils import generate_rsa_keypair, scp_to_tmp
+from ybops.utils.ssh import wait_for_ssh, format_rsa_key, validated_key_file, \
+    generate_rsa_keypair, scp_to_tmp, get_public_key_content, \
+    get_ssh_host_port, DEFAULT_SSH_USER
 
 
 class ConsoleLoggingErrorHandler(object):
