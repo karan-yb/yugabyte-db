@@ -79,6 +79,8 @@ public enum TaskType {
 
   SystemdUpgrade("upgrade.SystemdUpgrade"),
 
+  RebootUniverse("upgrade.RebootUniverse"),
+
   CreateRootVolumes("subtasks.CreateRootVolumes"),
 
   ReplaceRootVolume("subtasks.ReplaceRootVolume"),
@@ -108,6 +110,8 @@ public enum TaskType {
   RotateAccessKey("RotateAccessKey"),
 
   SetUniverseKey("SetUniverseKey"),
+
+  CreateAndRotateAccessKey("CreateAndRotateAccessKey"),
 
   @Deprecated
   SetKubernetesUniverseKey("SetKubernetesUniverseKey"),
@@ -214,6 +218,8 @@ public enum TaskType {
   WaitForMasterLeader("subtasks.WaitForMasterLeader"),
 
   WaitForServer("subtasks.WaitForServer"),
+
+  WaitForYbcServer("subtasks.WaitForYbcServer"),
 
   WaitForTServerHeartBeats("subtasks.WaitForTServerHeartBeats"),
 
@@ -346,7 +352,9 @@ public enum TaskType {
 
   ThirdpartySoftwareUpgrade("upgrade.ThirdpartySoftwareUpgrade"),
 
-  MarkUniverseForHealthScriptReUpload("subtasks.MarkUniverseForHealthScriptReUpload");
+  MarkUniverseForHealthScriptReUpload("subtasks.MarkUniverseForHealthScriptReUpload"),
+
+  RebootServer("subtasks.RebootServer");
 
   private String relativeClassPath;
 

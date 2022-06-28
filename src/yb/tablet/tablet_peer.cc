@@ -314,11 +314,6 @@ Status TabletPeer::InitTabletPeer(
   }
 
   RETURN_NOT_OK(set_cdc_min_replicated_index(meta_->cdc_min_replicated_index()));
-  if (tablet_->transaction_participant()) {
-    tablet_->transaction_participant()->SetIntentRetainOpIdAndTime(
-        meta_->cdc_sdk_min_checkpoint_op_id(),
-        MonoDelta::FromMilliseconds(GetAtomicFlag(&FLAGS_cdc_intent_retention_ms)));
-  }
 
   TRACE("TabletPeer::Init() finished");
   VLOG_WITH_PREFIX(2) << "Peer Initted";
@@ -847,7 +842,7 @@ void TabletPeer::GetInFlightOperations(Operation::TraceType trace_type,
     int64_t running_for_micros =
         MonoTime::Now().GetDeltaSince(driver->start_time()).ToMicroseconds();
     status_pb.set_running_for_micros(running_for_micros);
-    if (trace_type == Operation::TRACE_TXNS) {
+    if (trace_type == Operation::TRACE_TXNS && driver->trace()) {
       status_pb.set_trace_buffer(driver->trace()->DumpToString(true));
     }
     out->push_back(status_pb);

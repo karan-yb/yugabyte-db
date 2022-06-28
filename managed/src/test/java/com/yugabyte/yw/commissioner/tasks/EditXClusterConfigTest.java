@@ -77,6 +77,7 @@ public class EditXClusterConfigTest extends CommissionerBaseTest {
           TaskType.XClusterConfigSetStatus,
           TaskType.XClusterConfigRename,
           TaskType.XClusterConfigSetStatus,
+          TaskType.UniverseUpdateSucceeded,
           TaskType.UniverseUpdateSucceeded);
 
   List<TaskType> ADD_TABLE_IS_ALTER_DONE_FAILURE =
@@ -84,6 +85,7 @@ public class EditXClusterConfigTest extends CommissionerBaseTest {
           TaskType.XClusterConfigSetStatus,
           TaskType.XClusterConfigModifyTables,
           TaskType.XClusterConfigSetStatus,
+          TaskType.UniverseUpdateSucceeded,
           TaskType.UniverseUpdateSucceeded);
 
   @Before
@@ -693,6 +695,8 @@ public class EditXClusterConfigTest extends CommissionerBaseTest {
     XClusterConfig xClusterConfig =
         XClusterConfig.create(createFormData, XClusterConfigStatusType.Running);
 
+    initTargetUniverseClusterConfig(xClusterConfig.getReplicationGroupName(), 2);
+
     try {
       AlterUniverseReplicationResponse mockEditResponse =
           new AlterUniverseReplicationResponse(0, "", null);
@@ -728,6 +732,7 @@ public class EditXClusterConfigTest extends CommissionerBaseTest {
         XClusterConfig.create(createFormData, XClusterConfigStatusType.Running);
 
     HighAvailabilityConfig.create("test-cluster-key");
+    initTargetUniverseClusterConfig(xClusterConfig.getReplicationGroupName(), 2);
 
     try {
       AlterUniverseReplicationResponse mockEditResponse =
@@ -763,8 +768,9 @@ public class EditXClusterConfigTest extends CommissionerBaseTest {
     XClusterConfig xClusterConfig =
         XClusterConfig.create(createFormData, XClusterConfigStatusType.Running);
 
-    String alterErrMsg = "failed to modify tables";
+    initTargetUniverseClusterConfig(xClusterConfig.getReplicationGroupName(), 2);
 
+    String alterErrMsg = "failed to modify tables";
     try {
       AppStatusPB.Builder appStatusBuilder =
           AppStatusPB.newBuilder().setMessage(alterErrMsg).setCode(ErrorCode.UNKNOWN_ERROR);

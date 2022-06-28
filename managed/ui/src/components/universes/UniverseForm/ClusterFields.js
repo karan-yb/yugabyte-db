@@ -44,6 +44,7 @@ import pluralize from 'pluralize';
 import { AZURE_INSTANCE_TYPE_GROUPS } from '../../../redesign/universe/wizard/fields/InstanceTypeField/InstanceTypeField';
 import { isEphemeralAwsStorageInstance } from '../UniverseDetail/UniverseDetail';
 import { fetchSupportedReleases } from '../../../actions/universe';
+import { sortVersion } from '../../releases';
 
 // Default instance types for each cloud provider
 const DEFAULT_INSTANCE_TYPE_MAP = {
@@ -119,6 +120,7 @@ const initialState = {
   deviceInfo: {},
   placementInfo: {},
   ybSoftwareVersion: '',
+  ybcPackagePath: '',
   gflags: {},
   storageType: DEFAULT_STORAGE_TYPES['AWS'],
   accessKeyCode: '',
@@ -345,7 +347,9 @@ export default class ClusterFields extends Component {
 
     if (isNonEmptyObject(formValues['primary']) && clusterType !== 'primary') {
       this.setState({ universeName: formValues['primary'].universeName });
+      this.setState({ ybcPackagePath: formValues['primary'].ybcPackagePath });
       updateFormField(`${clusterType}.universeName`, formValues['primary'].universeName);
+      updateFormField(`${clusterType}.ybcPackagePath`, formValues['primary'].ybcPackagePath);
     }
 
     // This flag will prevent configure from being fired on component load
@@ -362,11 +366,13 @@ export default class ClusterFields extends Component {
           ? readOnlyCluster
             ? readOnlyCluster && {
                 ...readOnlyCluster.userIntent,
-                universeName: primaryCluster.userIntent.universeName
+                universeName: primaryCluster.userIntent.universeName,
+                ybcPackagePath: primaryCluster.userIntent.ybcPackagePath
               }
             : primaryCluster && {
                 ...primaryCluster.userIntent,
-                universeName: primaryCluster.userIntent.universeName
+                universeName: primaryCluster.userIntent.universeName,
+                ybcPackagePath: primaryCluster.userIntent.ybcPackagePath
               }
           : primaryCluster && primaryCluster.userIntent;
       const providerUUID = userIntent && userIntent.provider;
@@ -401,6 +407,7 @@ export default class ClusterFields extends Component {
           numNodes: userIntent.numNodes,
           replicationFactor: userIntent.replicationFactor,
           ybSoftwareVersion: userIntent.ybSoftwareVersion,
+          ybcPackagePath: userIntent.ybcPackagePath,
           assignPublicIP: userIntent.assignPublicIP,
           useTimeSync: userIntent.useTimeSync,
           enableYSQL: userIntent.enableYSQL,
@@ -680,10 +687,15 @@ export default class ClusterFields extends Component {
         updateFormField(`${clusterType}.provider`, firstProviderUuid);
         this.providerChanged(firstProviderUuid);
       }
-    } else if (type === 'Create' && clusterType === 'async' && formValues['primary']?.provider) {
-      const providerUUID = formValues['primary'].provider;
-      updateFormField(`${clusterType}.provider`, providerUUID);
-      this.providerChanged(providerUUID);
+    } else if (
+      type === 'Create' &&
+      clusterType === 'async' &&
+      formValues['primary']?.provider &&
+      !formValues[clusterType]?.provider
+    ) {
+      const primaryClusterProviderUUID = formValues['primary'].provider;
+      updateFormField(`${clusterType}.provider`, primaryClusterProviderUUID);
+      this.providerChanged(primaryClusterProviderUUID);
     }
     this.props.fetchRunTimeConfigs();
   }
@@ -1436,7 +1448,10 @@ export default class ClusterFields extends Component {
     const currentProviderData = this.getCurrentProvider(value) || {};
     if (type?.toUpperCase() === 'CREATE' && clusterType === 'primary') {
       const releaseArr = (await fetchSupportedReleases(value))?.data;
-      this.setState({ supportedReleases: releaseArr, ybSoftwareVersion: releaseArr[0] });
+      this.setState({
+        supportedReleases: releaseArr.sort(sortVersion),
+        ybSoftwareVersion: releaseArr[0]
+      });
       updateFormField(`${clusterType}.ybSoftwareVersion`, releaseArr[0]);
     }
 
@@ -1523,7 +1538,7 @@ export default class ClusterFields extends Component {
     });
   }
 
-  regionListChanged(value) {
+  regionListChanged(value = []) {
     const {
       formValues,
       clusterType,
@@ -1531,10 +1546,14 @@ export default class ClusterFields extends Component {
       cloud: { providers }
     } = this.props;
 
-    updateFormField(`${clusterType}.regionList`, value || []);
-    this.setState({ nodeSetViaAZList: false, regionList: value || [] });
-
+    //filter out regions that are not from current provider
     const currentProvider = providers.data.find((a) => a.uuid === formValues[clusterType].provider);
+    const providerRegions = currentProvider.regions.map((regions) => regions.uuid);
+    const regionItems = value.filter((region) => providerRegions.includes(region.value));
+
+    updateFormField(`${clusterType}.regionList`, regionItems);
+    this.setState({ nodeSetViaAZList: false, regionList: regionItems });
+
     if (!isNonEmptyString(formValues[clusterType].instanceType)) {
       updateFormField(
         `${clusterType}.instanceType`,
@@ -1623,9 +1642,12 @@ export default class ClusterFields extends Component {
     let tagsArray = <span />;
     let universeProviderList = [];
     let currentProviderCode = '';
-
     let currentProviderUUID = self.state.providerSelected;
     let currentAccessKey = self.state.accessKeyCode;
+
+    const primaryProviderUUID = formValues['primary']?.provider ?? '';
+    let primaryProviderCode = '';
+
     if (formValues[clusterType]) {
       if (formValues[clusterType].provider) currentProviderUUID = formValues[clusterType].provider;
 
@@ -1634,19 +1656,30 @@ export default class ClusterFields extends Component {
     }
 
     // Populate the cloud provider list
-    if (isNonEmptyArray(cloud.providers.data)) {
-      universeProviderList = cloud.providers.data.reduce((providerOption, providerItem) => {
-        if (this.props.type === 'Async' && providerItem.code === 'kubernetes') {
-          return providerOption;
+    if (isNonEmptyArray(cloud?.providers?.data)) {
+      cloud.providers.data.forEach((provider) => {
+        if (provider.uuid === currentProviderUUID) {
+          currentProviderCode = provider.code;
         }
-        if (providerItem.uuid === currentProviderUUID) {
-          currentProviderCode = providerItem.code;
+        if (provider.uuid === primaryProviderUUID) {
+          primaryProviderCode = provider.code;
         }
-        return providerOption.concat(
-          <option key={providerItem.uuid} value={providerItem.uuid}>
-            {providerItem.name}
-          </option>
-        );
+      });
+      universeProviderList = cloud.providers.data.reduce((providerList, provider) => {
+        if (
+          clusterType === 'primary' ||
+          (clusterType === 'async' &&
+            provider.code !== 'kubernetes' &&
+            primaryProviderCode !== '' &&
+            provider.code === primaryProviderCode)
+        ) {
+          providerList.push(
+            <option key={provider.uuid} value={provider.uuid}>
+              {provider.name}
+            </option>
+          );
+        }
+        return providerList;
       }, []);
     }
 
@@ -2713,6 +2746,16 @@ export default class ClusterFields extends Component {
                     onInputChanged={this.softwareVersionChanged}
                     readOnlySelect={isSWVersionReadOnly}
                   />
+
+                  {(featureFlags.test['enableYbc'] || featureFlags.released['enableYbc']) && (
+                    <Field
+                      name={`${clusterType}.ybcPackagePath`}
+                      type="text"
+                      component={YBTextInputWithLabel}
+                      label="YBC package path"
+                      isReadOnly={isFieldReadOnly}
+                    />
+                  )}
                 </div>
               </Col>
               {!this.state.isKubernetesUniverse && (
