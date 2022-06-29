@@ -124,7 +124,7 @@ class AnsibleProcess(object):
                 ])
 
             # Hack for ssh-2 server, treats as reserved words
-            if ssh_user != "centos" and not ssh2_bin_present:
+            if (ssh_user != "centos" and ssh2_bin_present) or not ssh2_bin_present:
                 process_args.extend([
                     "--user", ssh_user
                 ])

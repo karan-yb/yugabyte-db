@@ -33,7 +33,7 @@ from ybops.common.colors import Colors
 from ybops.common.exceptions import YBOpsRuntimeError
 from ybops.utils.remote_shell import RemoteShell
 from ybops.utils.ssh import (parse_private_key, SSH, get_ssh_client,
-                             _remote_exec_command, _run_command, check_ssh2_bin_present,
+                             _remote_exec_command,
                              SSH_TIMEOUT, SSH_RETRY_DELAY)
 
 BLOCK_SIZE = 4096

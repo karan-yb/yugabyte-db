@@ -13,6 +13,7 @@ import logging
 import os
 import json
 from ybops.utils.ssh import check_ssh2_bin_present, _remote_exec_command, SSHV2
+from ybops.common.exceptions import YBOpsRuntimeError
 
 warnings.filterwarnings("ignore")
 

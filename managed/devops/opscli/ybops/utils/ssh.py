@@ -70,8 +70,11 @@ def check_ssh2_bin_present():
     """Checks if the ssh2 is installed on the node
     :return: True/False
     """
-    output = _run_command(['command', '-v', '/usr/bin/sshg3', '/dev/null'])
-    return True if output is not None else False
+    try:
+        output = _run_command(['command', '-v', '/usr/bin/sshg3', '/dev/null'])
+        return True if output is not None else False
+    except YBOpsRuntimeError as e:
+        return False
 
 
 def __generate_shell_command(host_name, port, username, ssh_key_file, **kwargs):
