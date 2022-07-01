@@ -34,7 +34,7 @@ from ybops.common.exceptions import YBOpsRuntimeError
 from ybops.utils.remote_shell import RemoteShell
 from ybops.utils.ssh import (parse_private_key, SSH, get_ssh_client,
                              _remote_exec_command,
-                             SSH_TIMEOUT, SSH_RETRY_DELAY)
+                             SSH_TIMEOUT, SSH_RETRY_DELAY, SSHClient)
 
 BLOCK_SIZE = 4096
 HOME_FOLDER = os.environ["HOME"]
@@ -551,42 +551,20 @@ def remote_exec_command(host_name, port, username, ssh_key_file, cmd,
         stdout (str): output log
         stderr (str): error logs
     """
-    ssh_type = parse_private_key(ssh_key_file)
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) \
-        if ssh_type == SSH else ssh_key_file
     while retries_on_failure >= 0:
         logging.info("[app] Attempt #{} to execute remote command..."
                      .format(retries_on_failure + 1))
-        if ssh_type == SSH:
-            try:
-                ssh_client = get_ssh_client()
-                ssh_client.connect(hostname=host_name,
-                                   username=username,
-                                   pkey=ssh_key,
-                                   port=port,
-                                   timeout=timeout,
-                                   banner_timeout=timeout)
-
-                _, stdout, stderr = ssh_client.exec_command(cmd)
-                return stdout.channel.recv_exit_status(), stdout.readlines(), stderr.readlines()
-            except (paramiko.ssh_exception.NoValidConnectionsError,
-                    paramiko.ssh_exception.AuthenticationException,
-                    paramiko.ssh_exception.SSHException,
-                    socket.timeout, socket.error) as e:
-                logging.error("Failed to execute remote command: {}".format(e))
-                retries_on_failure -= 1
-                time.sleep(retry_delay)
-            finally:
-                ssh_client.close()
-        else:
-            try:
-                out = _remote_exec_command(host_name, username, ssh_key, port,
-                                           ssh_type, command=cmd).splitlines()
-                return 0, out, None
-            except (YBOpsRuntimeError, Exception) as e:
-                logging.error("Failed to execute remote command: {}".format(e))
-                retries_on_failure -= 1
-                time.sleep(retry_delay)
+        try:
+            ssh_client = SSHClient()
+            ssh_client.connect(host_name, username, ssh_key_file, port)
+            rc, stdout, stderr = ssh_client.exec_command(cmd)
+            return rc, stdout, stderr
+        except YBOpsRuntimeError as e:
+            logging.error("Failed to execute remote command: {}".format(e))
+            retries_on_failure -= 1
+            time.sleep(retry_delay)
+        finally:
+            ssh_client.close_connection()
 
     return 1, None, None  # treat this as a non-zero return code
 

@@ -35,6 +35,12 @@ SSH_TIMEOUT = 45
 # Retry in seconds
 SSH_RETRY_DELAY = 10
 RSA_KEY_LENGTH = 2048
+CONNECTION_RETRY_DELAY_SEC = 15
+# Let's set some timeout to our commands.
+# If 10 minutes will not be enough for something - will have to pass command timeout as an argument.
+# Just having timeout in shell script, which we're running on the node,
+# does not seem to always help - as ssh client connection itself or command results read can hang.
+COMMAND_TIMEOUT_SEC = 600
 
 
 def parse_private_key(key):
@@ -84,7 +90,6 @@ def __generate_shell_command(host_name, port, username, ssh_key_file, **kwargs):
     '''
     # The flag on which we specify the private_key_file differs in
     # ssh version. In SSH it is specified via `-i` will in SSH2 via `-K`
-    key_type = kwargs.get('key_type', SSHV2)
     extra_commands = kwargs.get('extra_commands', [])
     command = kwargs.get('command', None)
     src_filepath = kwargs.get('src_filepath', None)
@@ -140,10 +145,9 @@ def get_ssh_client(policy=paramiko.AutoAddPolicy):
     return ssh_client
 
 
-def _remote_exec_command(host, username, pkey, port, ssh_type, **kwargs):
+def _remote_exec_command(host, username, pkey, port, **kwargs):
     cmd = __generate_shell_command(
         host, port, username, pkey,
-        key_type=ssh_type,
         **kwargs
     )
     output = _run_command(cmd)
@@ -266,6 +270,7 @@ def format_rsa_key(key, public_key=False, key_type=SSH):
     Returns:
         key (str): Encoded key in OpenSSH or PEM format based on the flag (public key or not).
     """
+    # Check based on key_type not on SSH2 installed or not.
     if key_type == SSH:
         if public_key:
             return key.publickey().exportKey("OpenSSH").decode('utf-8')
@@ -401,3 +406,107 @@ def get_ssh_host_port(host_info, custom_port, default_port=False):
         "ssh_port": ssh_port,
         "ssh_host": host_info["private_ip"]
     }
+
+
+
+class SSHClient(object):
+
+    def __init__(self):
+        self.hostname = ''
+        self.username = ''
+        self.key = None
+        self.port = ''
+        self.client = None
+        self.sftp_client = None
+
+        # Need to be replaced with env variable read.
+        self.connection_type = SSHV2 if check_ssh2_bin_present() else SSH
+
+
+    def connect(self, hostname, username, key, port, retry=1, timeout=SSH_TIMEOUT):
+
+        if self.connection_type == SSH:
+            ssh_key = paramiko.RSAKey.from_private_key_file(key)
+            attempt = 1
+            while True:
+                try:
+                    self.client = paramiko.SSHClient()
+                    self.client.set_missing_host_key_policy(paramiko.MissingHostKeyPolicy())
+                    self.client.connect(
+                        hostname=hostname,
+                        username=username,
+                        pkey=ssh_key,
+                        port=port,
+                        timeout=timeout,
+                        banner_timeout=timeout
+                    )
+                    return
+                except socket.error as ex:
+                    logging.info("Failed to establish SSH connection to {}:{} - {}"
+                                .format(self.ip, self.port, str(ex)))
+                    if attempt >= retry:
+                        raise YBOpsRuntimeError(ex)
+                    attempt += 1
+                    time.sleep(CONNECTION_RETRY_DELAY_SEC)
+        else:
+            self.hostname = hostname
+            self.username = username
+            self.key = key
+            self.port = port
+
+
+    def exec_command(self, cmd, **kwargs):
+
+        output_only = kwargs.get('output_only', False)
+        if self.connection_type == SSH:
+            if isinstance(cmd, str):
+                command = cmd
+            else:
+                # Need to join with spaces, but surround arguments with spaces using "'" character
+                command = ' '.join(
+                    list(map(lambda part: part if ' ' not in part else "'" + part + "'", cmd)))
+            _, stdout, stderr = self.client.exec_command(command)
+            if not output_only:
+                return stdout.channel.recv_exit_status(), stdout.readlines(), stderr.readlines()
+            else:
+                return_code = stdout.channel.recv_exit_status()
+                if return_code != 0:
+                    error = self.read_output(stderr)
+                    raise YBOpsRuntimeError('Command \'{}\' returned error code {}: {}'
+                                    .format(command, return_code, error))
+                output = self.read_output(stdout)
+                return output
+        else:
+            cmd = __generate_shell_command(self.hostname, self.port, self.username, self.key, command=cmd)
+            output = _run_command(cmd)
+            if not output_only:
+                return 0, output, None
+            else:
+                return output
+
+
+    def close_connection(self):
+
+        if self.connection_type == SSH:
+            self.client.close()
+
+
+    def get_sftp_client(self):
+
+        if self.connection_type == SSH:
+            self.sftp_client = self.client.open_sftp()
+            return self.sftp_client
+
+
+   # We saw this script hang. The only place which can hang in theory is ssh command execution
+    # and reading it's results.
+    # Applied one of described workaround from this issue:
+    # https://github.com/paramiko/paramiko/issues/109
+    def read_output(self, stream):
+        end_time = time.time() + COMMAND_TIMEOUT_SEC
+        while not stream.channel.eof_received:
+            time.sleep(1)
+            if time.time() > end_time:
+                stream.channel.close()
+            break
+        return stream.read().decode()
