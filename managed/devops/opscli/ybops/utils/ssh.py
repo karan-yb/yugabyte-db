@@ -137,23 +137,6 @@ def __generate_shell_command(host_name, port, username, ssh_key_file, **kwargs):
     return cmd
 
 
-def get_ssh_client(policy=paramiko.AutoAddPolicy):
-    """This method returns a paramiko SSH client with the appropriate policy
-    """
-    ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(policy())
-    return ssh_client
-
-
-def _remote_exec_command(host, username, pkey, port, **kwargs):
-    cmd = __generate_shell_command(
-        host, port, username, pkey,
-        **kwargs
-    )
-    output = _run_command(cmd)
-    return output
-
-
 def _run_command(args, num_retry=1, timeout=1, **kwargs):
     cmd_as_str = quote_cmd_line_for_bash(args)
     logging.info("[app] Executing command \"{}\" on the remote server".format(cmd_as_str))
@@ -202,41 +185,17 @@ def can_ssh(host_name, port, username, ssh_key_file):
     Returns:
         (boolean): If SSH was successful or not.
     """
-    ssh_type = parse_private_key(ssh_key_file)
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) \
-        if ssh_type == SSH else ssh_key_file
-
-    if ssh_type == SSH:
-        ssh_client = get_ssh_client()
-        try:
-            ssh_client.connect(hostname=host_name,
-                               username=username,
-                               pkey=ssh_key,
-                               port=port,
-                               timeout=SSH_TIMEOUT,
-                               banner_timeout=SSH_TIMEOUT)
-            ssh_client.invoke_shell()
+    try:
+        ssh_client = SSHClient()
+        ssh_client.connect(host_name, username, ssh_key_file, port)
+        stdout = ssh_client.exec_command("echo 'test'", output_only=True)
+        stdout = stdout.splitlines()
+        if len(stdout) == 1 and (stdout[0] == "test"):
             return True
-        except (paramiko.ssh_exception.NoValidConnectionsError,
-                paramiko.ssh_exception.AuthenticationException,
-                paramiko.ssh_exception.SSHException,
-                socket.timeout,
-                socket.error,
-                EOFError):
-            return False
-        finally:
-            ssh_client.close()
-    else:
-        try:
-            cmd = "echo 'test'"
-            out = _remote_exec_command(host_name, username, ssh_key, port,
-                                       ssh_type, command=cmd).splitlines()
-            if len(out) == 1 and out[0] == "test":
-                return True
-            return False
-        except (YBOpsRuntimeError, Exception) as e:
-            logging.error("Error Checking the instance, {}".format(e))
-            return False
+        return False
+    except (YBOpsRuntimeError, Exception) as e:
+        logging.error("Error Checking the instance, {}".format(e))
+        return False
 
 
 def wait_for_ssh(host_ip, ssh_port, ssh_user, ssh_key, num_retries=SSH_RETRY_LIMIT):
@@ -303,8 +262,8 @@ def validated_key_file(key_file):
     if not os.path.exists(key_file):
         raise YBOpsRuntimeError("Key file {} not found.".format(key_file))
 
+    # Check based on key_type not on SSH2 installed or not.
     ssh_type = parse_private_key(key_file)
-    logging.info("[app], ssh key type {}".format(ssh_type))
     if ssh_type == SSH:
         with open(key_file) as f:
             return RSA.importKey(f.read()), ssh_type
@@ -418,7 +377,6 @@ class SSHClient(object):
         self.port = ''
         self.client = None
         self.sftp_client = None
-
         # Need to be replaced with env variable read.
         self.connection_type = SSHV2 if check_ssh2_bin_present() else SSH
 
@@ -427,8 +385,8 @@ class SSHClient(object):
 
         if self.connection_type == SSH:
             ssh_key = paramiko.RSAKey.from_private_key_file(key)
-            attempt = 1
-            while True:
+            attempt = 0
+            while attempt < retry:
                 try:
                     self.client = paramiko.SSHClient()
                     self.client.set_missing_host_key_policy(paramiko.MissingHostKeyPolicy())
@@ -442,11 +400,11 @@ class SSHClient(object):
                     )
                     return
                 except socket.error as ex:
-                    logging.info("Failed to establish SSH connection to {}:{} - {}"
+                    logging.info("[app] Failed to establish SSH connection to {}:{} - {}"
                                 .format(self.ip, self.port, str(ex)))
+                    attempt += 1
                     if attempt >= retry:
                         raise YBOpsRuntimeError(ex)
-                    attempt += 1
                     time.sleep(CONNECTION_RETRY_DELAY_SEC)
         else:
             self.hostname = hostname
@@ -465,6 +423,7 @@ class SSHClient(object):
                 # Need to join with spaces, but surround arguments with spaces using "'" character
                 command = ' '.join(
                     list(map(lambda part: part if ' ' not in part else "'" + part + "'", cmd)))
+            logging.info("[app] Executing command on the remote server {}, {}".format(command, self.client))
             _, stdout, stderr = self.client.exec_command(command)
             if not output_only:
                 return stdout.channel.recv_exit_status(), stdout.readlines(), stderr.readlines()
@@ -510,3 +469,52 @@ class SSHClient(object):
                 stream.channel.close()
             break
         return stream.read().decode()
+
+
+    def exec_script(self, local_script_name, params):
+        '''
+        Function to execute a local bash script on the remote ssh server.
+        Parameters:
+        local_script_name : Path to the shell script on local machine
+        params: List of arguments to be provided to the shell script
+        '''
+        if not isinstance(params, str):
+            params = ' '.join(params)
+
+        with open(local_script_name, "r") as f:
+            local_script = f.read()
+
+        # Heredoc syntax for input redirection from a local shell script
+        command = f"/bin/bash -s {params} <<'EOF'\n{local_script}\nEOF"
+        stdout = self.exec_command(command, output_only=True)
+
+        return stdout
+
+
+    def download_file_from_remote_server(self, remote_file_name, local_file_name):
+
+        if self.connection_type == SSH:
+            self.sftp_client = self.client.open_sftp()
+            try:
+                self.sftp_client.get(remote_file_name, local_file_name)
+            finally:
+                self.sftp_client.close()
+        else:
+            cmd = __generate_shell_command(self.hostname, self.port, self.username, self.key, src_filepath=remote_file_name,
+                                           dest_filepath=local_file_name,
+                                           get_from_remote=True)
+            _run_command(cmd)
+
+
+    def upload_file_to_remote_server(self, local_file_name, remote_file_name):
+
+        if self.connection_type == SSH:
+            self.sftp_client = self.client.open_sftp()
+            try:
+                self.sftp_client.put(local_file_name, remote_file_name)
+            finally:
+                self.sftp_client.close()
+        else:
+            cmd = __generate_shell_command(self.hostname, self.port, self.username, self.key, src_filepath=local_file_name,
+                                           dest_filepath=remote_file_name)
+            _run_command(cmd)
