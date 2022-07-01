@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright 2019 YugaByte, Inc. and Contributors
+# Copyright 2022 YugaByte, Inc. and Contributors
 #
 # Licensed under the Polyform Free Trial License 1.0.0 (the "License"); you
 # may not use this file except in compliance with the License. You
@@ -24,7 +24,7 @@ from Crypto.PublicKey import RSA
 
 from ybops.common.exceptions import YBOpsRuntimeError
 
-SSHV2 = 'ssh_v2'
+SSH2 = 'ssh2'
 SSH = 'ssh'
 SSH_RETRY_LIMIT = 60
 SSH_RETRY_LIMIT_PRECHECK = 4
@@ -47,7 +47,7 @@ def parse_private_key(key):
     """Parses the private key file, & returns
     the underlying format that the key uses.
     :param key: private key file.
-    :return: Private key type(One of SSHv2/SSH).
+    :return: Private key type(One of SSH2/SSH).
     """
     if key is None:
         raise YBOpsRuntimeError("Private key file not specified. Returning.")
@@ -66,95 +66,24 @@ def parse_private_key(key):
             '''
             key_val = key_data.split('\n')
             if 'Subject' in key_val[1] and 'Comment' in key_val[2]:
-                return SSHV2
+                return SSH2
 
     logging.info("[app], specified key format is not supported.")
     raise YBOpsRuntimeError("Specified key format is not supported.")
 
 
-def check_ssh2_bin_present():
-    """Checks if the ssh2 is installed on the node
-    :return: True/False
-    """
-    try:
-        output = _run_command(['command', '-v', '/usr/bin/sshg3', '/dev/null'])
-        return True if output is not None else False
-    except YBOpsRuntimeError as e:
-        return False
+# def check_ssh2_bin_present():
+#     """Checks if the ssh2 is installed on the node
+#     :return: True/False
+#     """
+#     try:
+#         output = run_command(['command', '-v', '/usr/bin/sshg3', '/dev/null'])
+#         return True if output is not None else False
+#     except YBOpsRuntimeError as e:
+#         return False
 
 
-def __generate_shell_command(host_name, port, username, ssh_key_file, **kwargs):
-    '''
-        This method generates & returns the actual shell command,
-        that will be executed as subprocess.
-    '''
-    # The flag on which we specify the private_key_file differs in
-    # ssh version. In SSH it is specified via `-i` will in SSH2 via `-K`
-    extra_commands = kwargs.get('extra_commands', [])
-    command = kwargs.get('command', None)
-    src_filepath = kwargs.get('src_filepath', None)
-    dest_filepath = kwargs.get('dest_filepath', None)
-    is_file_download = kwargs.get('get_from_remote', False)
-
-    ssh2_bin_present = check_ssh2_bin_present()
-    ssh_key_flag = '-K'
-    if not ssh2_bin_present:
-        ssh_key_flag = '-i'
-    cmd = []
-
-    if not src_filepath and not dest_filepath:
-        cmd = ['ssh', '-p', str(port)]
-    else:
-        cmd = ['scp', '-P', str(port)]
-
-    if len(extra_commands) != 0:
-        cmd += extra_commands
-
-    cmd.extend([
-        '-o', 'StrictHostKeyChecking=no',
-        ssh_key_flag, ssh_key_file,
-    ])
-
-    if not src_filepath and not dest_filepath:
-        cmd.extend([
-            '%s@%s' % (username, host_name)
-        ])
-        if isinstance(command, list):
-            cmd += command
-        else:
-            cmd.append(command)
-    else:
-        if not is_file_download:
-            cmd.extend([
-                src_filepath,
-                '%s@%s:%s' % (username, host_name, dest_filepath)
-            ])
-        else:
-            cmd.extend([
-                '%s@%s:%s' % (username, host_name, src_filepath),
-                dest_filepath
-            ])
-    return cmd
-
-
-def get_ssh_client(policy=paramiko.AutoAddPolicy):
-    """This method returns a paramiko SSH client with the appropriate policy
-    """
-    ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(policy())
-    return ssh_client
-
-
-def _remote_exec_command(host, username, pkey, port, **kwargs):
-    cmd = __generate_shell_command(
-        host, port, username, pkey,
-        **kwargs
-    )
-    output = _run_command(cmd)
-    return output
-
-
-def _run_command(args, num_retry=1, timeout=1, **kwargs):
+def run_command(args, num_retry=1, timeout=1, **kwargs):
     cmd_as_str = quote_cmd_line_for_bash(args)
     logging.info("[app] Executing command \"{}\" on the remote server".format(cmd_as_str))
     while num_retry > 0:
@@ -191,7 +120,7 @@ def sleep_or_raise(num_retry, timeout, ex):
         raise ex
 
 
-def can_ssh(host_name, port, username, ssh_key_file):
+def can_ssh(host_name, port, username, ssh_key_file, **kwargs):
     """This method tries to ssh to the host with the username provided on the port.
     and returns if ssh was successful or not.
     Args:
@@ -202,44 +131,21 @@ def can_ssh(host_name, port, username, ssh_key_file):
     Returns:
         (boolean): If SSH was successful or not.
     """
-    ssh_type = parse_private_key(ssh_key_file)
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) \
-        if ssh_type == SSH else ssh_key_file
-
-    if ssh_type == SSH:
-        ssh_client = get_ssh_client()
-        try:
-            ssh_client.connect(hostname=host_name,
-                               username=username,
-                               pkey=ssh_key,
-                               port=port,
-                               timeout=SSH_TIMEOUT,
-                               banner_timeout=SSH_TIMEOUT)
-            ssh_client.invoke_shell()
+    try:
+        ssh2_enabled = kwargs.get('ssh2_enabled', False)
+        ssh_client = SSHClient(ssh2_enabled=ssh2_enabled)
+        ssh_client.connect(host_name, username, ssh_key_file, port)
+        stdout = ssh_client.exec_command("echo 'test'", output_only=True)
+        stdout = stdout.splitlines()
+        if len(stdout) == 1 and (stdout[0] == "test"):
             return True
-        except (paramiko.ssh_exception.NoValidConnectionsError,
-                paramiko.ssh_exception.AuthenticationException,
-                paramiko.ssh_exception.SSHException,
-                socket.timeout,
-                socket.error,
-                EOFError):
-            return False
-        finally:
-            ssh_client.close()
-    else:
-        try:
-            cmd = "echo 'test'"
-            out = _remote_exec_command(host_name, username, ssh_key, port,
-                                       ssh_type, command=cmd).splitlines()
-            if len(out) == 1 and out[0] == "test":
-                return True
-            return False
-        except (YBOpsRuntimeError, Exception) as e:
-            logging.error("Error Checking the instance, {}".format(e))
-            return False
+        return False
+    except (YBOpsRuntimeError, Exception) as e:
+        logging.error("Error Checking the instance, {}".format(e))
+        return False
 
 
-def wait_for_ssh(host_ip, ssh_port, ssh_user, ssh_key, num_retries=SSH_RETRY_LIMIT):
+def wait_for_ssh(host_ip, ssh_port, ssh_user, ssh_key, num_retries=SSH_RETRY_LIMIT, **kwargs):
     """This method would basically wait for the given host's ssh to come up, by looping
     and checking if the ssh is active. And timesout if retries reaches num_retries.
     Args:
@@ -252,7 +158,7 @@ def wait_for_ssh(host_ip, ssh_port, ssh_user, ssh_key, num_retries=SSH_RETRY_LIM
     """
     retry_count = 0
     while retry_count < num_retries:
-        if can_ssh(host_ip, ssh_port, ssh_user, ssh_key):
+        if can_ssh(host_ip, ssh_port, ssh_user, ssh_key, **kwargs):
             return True
 
         time.sleep(1)
@@ -261,7 +167,7 @@ def wait_for_ssh(host_ip, ssh_port, ssh_user, ssh_key, num_retries=SSH_RETRY_LIM
     return False
 
 
-def format_rsa_key(key, public_key=False, key_type=SSH):
+def format_rsa_key(key, public_key=False):
     """This method would take the rsa key and format it based on whether it is
     public key or private key.
     Args:
@@ -270,14 +176,13 @@ def format_rsa_key(key, public_key=False, key_type=SSH):
     Returns:
         key (str): Encoded key in OpenSSH or PEM format based on the flag (public key or not).
     """
-    # Check based on key_type not on SSH2 installed or not.
-    if key_type == SSH:
+    if isinstance(key, RSA.RsaKey):
         if public_key:
             return key.publickey().exportKey("OpenSSH").decode('utf-8')
         return key.exportKey("PEM").decode('utf-8')
     else:
         if public_key:
-            _run_command(['ssh-keygen-g3', '-D', key])
+            run_command(['ssh-keygen-g3', '-D', key])
             file = key + '.pub'
             p_key = None
             with open(file) as f:
@@ -304,12 +209,11 @@ def validated_key_file(key_file):
         raise YBOpsRuntimeError("Key file {} not found.".format(key_file))
 
     ssh_type = parse_private_key(key_file)
-    logging.info("[app], ssh key type {}".format(ssh_type))
     if ssh_type == SSH:
         with open(key_file) as f:
-            return RSA.importKey(f.read()), ssh_type
+            return RSA.importKey(f.read())
     else:
-        return key_file, ssh_type
+        return key_file
 
 
 def generate_rsa_keypair(key_name, destination='/tmp'):
@@ -343,13 +247,13 @@ def generate_rsa_keypair(key_name, destination='/tmp'):
     return private_key_filename, public_key_filename
 
 
-def scp_to_tmp(filepath, host, user, port, private_key):
+def scp_to_tmp(filepath, host, user, port, private_key, **kwargs):
     dest_path = os.path.join("/tmp", os.path.basename(filepath))
     logging.info("[app] Copying local '{}' to remote '{}'".format(
         filepath, dest_path))
-    ssh2_bin_present = check_ssh2_bin_present()
+    ssh2_enabled = kwargs.get('ssh2_enabled', False)
     ssh_key_flag = '-K'
-    if not ssh2_bin_present:
+    if not ssh2_enabled:
         ssh_key_flag = '-i'
     scp_cmd = [
         "scp", ssh_key_flag, private_key, "-P", str(port), "-p",
@@ -408,27 +312,31 @@ def get_ssh_host_port(host_info, custom_port, default_port=False):
     }
 
 
-
 class SSHClient(object):
-
-    def __init__(self):
+    '''
+        Base SSH Class Library. Handles invoking the paramiko in case
+        the OpenSSH keys are used for initialization, 
+        invokes native ssh command otherwise. 
+    '''
+    def __init__(self, ssh2_enabled=False):
         self.hostname = ''
         self.username = ''
         self.key = None
         self.port = ''
         self.client = None
         self.sftp_client = None
-
-        # Need to be replaced with env variable read.
-        self.connection_type = SSHV2 if check_ssh2_bin_present() else SSH
+        self.ssh_type = SSH2 if  ssh2_enabled else SSH
 
 
     def connect(self, hostname, username, key, port, retry=1, timeout=SSH_TIMEOUT):
-
-        if self.connection_type == SSH:
+        '''
+            Initializes the connection or stores the relevant information
+            needed for performing native ssh.
+        '''
+        if self.ssh_type == SSH:
             ssh_key = paramiko.RSAKey.from_private_key_file(key)
-            attempt = 1
-            while True:
+            attempt = 0
+            while attempt < retry:
                 try:
                     self.client = paramiko.SSHClient()
                     self.client.set_missing_host_key_policy(paramiko.MissingHostKeyPolicy())
@@ -442,11 +350,11 @@ class SSHClient(object):
                     )
                     return
                 except socket.error as ex:
-                    logging.info("Failed to establish SSH connection to {}:{} - {}"
+                    logging.info("[app] Failed to establish SSH connection to {}:{} - {}"
                                 .format(self.ip, self.port, str(ex)))
+                    attempt += 1
                     if attempt >= retry:
                         raise YBOpsRuntimeError(ex)
-                    attempt += 1
                     time.sleep(CONNECTION_RETRY_DELAY_SEC)
         else:
             self.hostname = hostname
@@ -456,15 +364,20 @@ class SSHClient(object):
 
 
     def exec_command(self, cmd, **kwargs):
-
+        '''
+            Executes the command on the remote machine.
+            If `output_only` kwargs is passed, then only output
+            is returned to the client. Else we return stdin, stdout, stderr.
+        '''
         output_only = kwargs.get('output_only', False)
-        if self.connection_type == SSH:
+        if self.ssh_type == SSH:
             if isinstance(cmd, str):
                 command = cmd
             else:
                 # Need to join with spaces, but surround arguments with spaces using "'" character
                 command = ' '.join(
                     list(map(lambda part: part if ' ' not in part else "'" + part + "'", cmd)))
+            logging.info("[app] Executing command on the remote server {}, {}".format(command, self.client))
             _, stdout, stderr = self.client.exec_command(command)
             if not output_only:
                 return stdout.channel.recv_exit_status(), stdout.readlines(), stderr.readlines()
@@ -477,8 +390,8 @@ class SSHClient(object):
                 output = self.read_output(stdout)
                 return output
         else:
-            cmd = __generate_shell_command(self.hostname, self.port, self.username, self.key, command=cmd)
-            output = _run_command(cmd)
+            cmd = self.__generate_shell_command(self.hostname, self.port, self.username, self.key, command=cmd)
+            output = run_command(cmd)
             if not output_only:
                 return 0, output, None
             else:
@@ -486,19 +399,25 @@ class SSHClient(object):
 
 
     def close_connection(self):
-
-        if self.connection_type == SSH:
+        '''
+            Closes the remote connection, for paramiko
+            client opened for openssh connection.
+        '''
+        if self.ssh_type == SSH:
             self.client.close()
 
 
     def get_sftp_client(self):
-
-        if self.connection_type == SSH:
+        '''
+            Returns the ftp client for openssh connection
+            having initialized the paramiko client.
+        '''
+        if self.ssh_type == SSH:
             self.sftp_client = self.client.open_sftp()
             return self.sftp_client
 
 
-   # We saw this script hang. The only place which can hang in theory is ssh command execution
+    # We saw this script hang. The only place which can hang in theory is ssh command execution
     # and reading it's results.
     # Applied one of described workaround from this issue:
     # https://github.com/paramiko/paramiko/issues/109
@@ -510,3 +429,114 @@ class SSHClient(object):
                 stream.channel.close()
             break
         return stream.read().decode()
+
+
+    def exec_script(self, local_script_name, params):
+        '''
+        Function to execute a local bash script on the remote ssh server.
+        Parameters:
+        local_script_name : Path to the shell script on local machine
+        params: List of arguments to be provided to the shell script
+        '''
+        if not isinstance(params, str):
+            params = ' '.join(params)
+
+        with open(local_script_name, "r") as f:
+            local_script = f.read()
+
+        # Heredoc syntax for input redirection from a local shell script
+        command = f"/bin/bash -s {params} <<'EOF'\n{local_script}\nEOF"
+        stdout = self.exec_command(command, output_only=True)
+
+        return stdout
+
+
+    def download_file_from_remote_server(self, remote_file_name, local_file_name):
+        '''
+            Function to download a file from remote server on the local machine.
+            Parameters:
+            local_file_name : Path to the shell script on local machine
+            remote_file_name: Path to the shell script on remote machine
+        '''
+        if self.ssh_type == SSH:
+            self.sftp_client = self.client.open_sftp()
+            try:
+                self.sftp_client.get(remote_file_name, local_file_name)
+            finally:
+                self.sftp_client.close()
+        else:
+            cmd = self.__generate_shell_command(self.hostname, self.port, self.username, self.key, src_filepath=remote_file_name,
+                                           dest_filepath=local_file_name,
+                                           get_from_remote=True)
+            run_command(cmd)
+
+
+    def upload_file_to_remote_server(self, local_file_name, remote_file_name):
+        '''
+            Function to upload a file from local server on the remote machine.
+            Parameters:
+            local_file_name : Path to the shell script on local machine
+            remote_file_name: Path to the shell script on remote machine
+        '''
+        if self.ssh_type == SSH:
+            self.sftp_client = self.client.open_sftp()
+            try:
+                self.sftp_client.put(local_file_name, remote_file_name)
+            finally:
+                self.sftp_client.close()
+        else:
+            cmd = self.__generate_shell_command(self.hostname, self.port, self.username, self.key, src_filepath=local_file_name,
+                                           dest_filepath=remote_file_name)
+            run_command(cmd)
+
+    def __generate_shell_command(self, host_name, port, username, ssh_key_file, **kwargs):
+        '''
+            This method generates & returns the actual shell command,
+            that will be executed as subprocess.
+        '''
+        # The flag on which we specify the private_key_file differs in
+        # ssh version. In SSH it is specified via `-i` will in SSH2 via `-K`
+        extra_commands = kwargs.get('extra_commands', [])
+        command = kwargs.get('command', None)
+        src_filepath = kwargs.get('src_filepath', None)
+        dest_filepath = kwargs.get('dest_filepath', None)
+        is_file_download = kwargs.get('get_from_remote', False)
+
+        ssh_key_flag = '-K'
+        if self.ssh_type == SSH:
+            ssh_key_flag = '-i'
+        cmd = []
+
+        if not src_filepath and not dest_filepath:
+            cmd = ['ssh', '-p', str(port)]
+        else:
+            cmd = ['scp', '-P', str(port)]
+
+        if len(extra_commands) != 0:
+            cmd += extra_commands
+
+        cmd.extend([
+            '-o', 'StrictHostKeyChecking=no',
+            ssh_key_flag, ssh_key_file,
+        ])
+
+        if not src_filepath and not dest_filepath:
+            cmd.extend([
+                '%s@%s' % (username, host_name)
+            ])
+            if isinstance(command, list):
+                cmd += command
+            else:
+                cmd.append(command)
+        else:
+            if not is_file_download:
+                cmd.extend([
+                    src_filepath,
+                    '%s@%s:%s' % (username, host_name, dest_filepath)
+                ])
+            else:
+                cmd.extend([
+                    '%s@%s:%s' % (username, host_name, src_filepath),
+                    dest_filepath
+                ])
+        return cmd

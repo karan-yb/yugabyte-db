@@ -14,7 +14,6 @@ import distro
 import json
 import logging
 import os
-import paramiko
 import pipes
 import platform
 import random
@@ -26,15 +25,12 @@ import subprocess
 import sys
 import time
 
-from Crypto.PublicKey import RSA
 from enum import Enum
 
 from ybops.common.colors import Colors
 from ybops.common.exceptions import YBOpsRuntimeError
 from ybops.utils.remote_shell import RemoteShell
-from ybops.utils.ssh import (parse_private_key, SSH, get_ssh_client,
-                             _remote_exec_command,
-                             SSH_TIMEOUT, SSH_RETRY_DELAY, SSHClient)
+from ybops.utils.ssh import SSH_RETRY_DELAY, SSHClient
 
 BLOCK_SIZE = 4096
 HOME_FOLDER = os.environ["HOME"]
@@ -406,7 +402,7 @@ class ValidationResult(Enum):
         return json.dumps({"state": self.name, "message": self.value})
 
 
-def validate_instance(host_name, port, username, ssh_key_file, mount_paths):
+def validate_instance(host_name, port, username, ssh_key_file, mount_paths, **kwargs):
     """This method tries to ssh to the host with the username provided on the port, executes a
     simple ls statement on the provided mount path and checks that the OS is centos-7. It returns
     0 if succeeded, 1 if ssh failed, 2 if mount path failed, or 3 if the OS was incorrect.
@@ -419,69 +415,30 @@ def validate_instance(host_name, port, username, ssh_key_file, mount_paths):
     Returns:
         (dict): return success/failure code and corresponding message (0 = success, 1-3 = failure)
     """
-    ssh_type = parse_private_key(ssh_key_file)
-    logging.info("[app], ssh key type {}".format(ssh_type))
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) \
-        if ssh_type == SSH else ssh_key_file
-    os_check_cmd = "source /etc/os-release && echo \"$NAME $VERSION_ID\""
+    try:
+        ssh2_enabled = kwargs.get('ssh2_enabled', False)
+        ssh_client = SSHClient(ssh2_enabled=ssh2_enabled)
+        ssh_client.connect(host_name, username, ssh_key_file, port)
+        for path in [mount_path.strip() for mount_path in mount_paths]:
+            path = '"' + re.sub('[`"]', '', path) + '"'
+            stdout = ssh_client.exec_command("ls -a " + path + "", output_only=True)
+            if len(stdout) == 0:
+                return ValidationResult.INVALID_MOUNT_POINTS
 
-    if ssh_type == SSH:
-        try:
-            ssh_client = get_ssh_client()
-            # Try to connect via SSH
-            ssh_client.connect(hostname=host_name,
-                               username=username,
-                               pkey=ssh_key,
-                               port=port,
-                               timeout=SSH_TIMEOUT,
-                               banner_timeout=SSH_TIMEOUT)
+        _, output, _ = ssh_client.exec_command("source /etc/os-release && echo \"$NAME $VERSION_ID\"")
+        if len(output) == 0 or output[0].strip().lower() != "centos linux 7":
+            return ValidationResult.INVALID_OS
 
-            # Try to find mount paths
-            for path in [mount_path.strip() for mount_path in mount_paths]:
-                path = '"' + re.sub('[`"]', '', path) + '"'
-                stdin, stdout, stderr = ssh_client.exec_command("ls -a " + path + "")
-                if len(stderr.readlines()) == 0:
-                    return ValidationResult.INVALID_MOUNT_POINTS
-
-            # Verify OS version (inOutErr = tuple(stdin, stdout, stderr))
-            inOutErr = ssh_client.exec_command(os_check_cmd)
-            result = inOutErr[1].readlines()
-            if len(result) == 0 or result[0].strip().lower() != "centos linux 7":
-                return ValidationResult.INVALID_OS
-
-            # If we get this far, then we succeeded
-            return ValidationResult.VALID
-
-        except paramiko.ssh_exception.AuthenticationException:
-            return ValidationResult.INVALID_SSH_KEY
-        except (paramiko.ssh_exception.NoValidConnectionsError,
-                paramiko.ssh_exception.SSHException,
-                socket.timeout):
-            return ValidationResult.UNREACHABLE
-
-        finally:
-            ssh_client.close()
-    else:
-        try:
-            for path in [mount_path.strip() for mount_path in mount_paths]:
-                path = '"' + re.sub('[`"]', '', path) + '"'
-                cmd = "ls -a " + path + ""
-                out = _remote_exec_command(host_name, username, ssh_key, port,
-                                           ssh_type, command=cmd).splitlines()
-                if len(stdout) == 0:
-                    return ValidationResult.INVALID_MOUNT_POINTS
-
-            out = _remote_exec_command(host_name, username, ssh_key, port,
-                                       ssh_type, command=os_check_cmd).splitlines()
-            if len(out) == 0 or out[0].strip().lower() != "centos linux 7":
-                return ValidationResult.INVALID_OS
-            return ValidationResult.VALID
-        except (YBOpsRuntimeError, Exception) as e:
-            logging.error("Failed to execute remote command: {}".format(e))
-            return ValidationResult.UNREACHABLE
+        # If we get this far, then we succeeded
+        return ValidationResult.VALID
+    except YBOpsRuntimeError as ex:
+        logging.error("[app] lol in validation Failed to execute remote command: {}".format(ex))
+        return ValidationResult.UNREACHABLE
+    finally:
+        ssh_client.close_connection()
 
 
-def validate_cron_status(host_name, port, username, ssh_key_file):
+def validate_cron_status(host_name, port, username, ssh_key_file, **kwargs):
     """This method tries to ssh to the host with the username provided on the port, checks if
     our expected cronjobs are present, and returns true if they are. Any failure, including SSH
     issues will cause it to return false.
@@ -493,49 +450,22 @@ def validate_cron_status(host_name, port, username, ssh_key_file):
     Returns:
         bool: true if all cronjobs are present, false otherwise (or if errored)
     """
-    ssh_type = parse_private_key(ssh_key_file)
-    logging.info("[app], ssh key type {}".format(ssh_type))
-    ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file) \
-        if ssh_type == SSH else ssh_key_file
-
-    if ssh_key == SSH:
-        ssh_key = paramiko.RSAKey.from_private_key_file(ssh_key_file)
-        ssh_client = get_ssh_client()
-        try:
-            # Try to connect via SSH
-            ssh_client.connect(hostname=host_name,
-                               username=username,
-                               pkey=ssh_key,
-                               port=port,
-                               timeout=SSH_TIMEOUT,
-                               banner_timeout=SSH_TIMEOUT)
-
-            _, stdout, stderr = ssh_client.exec_command("crontab -l")
-            cronjobs = ["clean_cores.sh", "zip_purge_yb_logs.sh", "yb-server-ctl.sh tserver"]
-            stdout = stdout.read().decode('utf-8')
-            return len(stderr.readlines()) == 0 and all(c in stdout for c in cronjobs)
-        except (paramiko.ssh_exception.NoValidConnectionsError,
-                paramiko.ssh_exception.AuthenticationException,
-                paramiko.ssh_exception.SSHException,
-                socket.timeout, socket.error) as e:
-            logging.error("Failed to validate cronjobs: {}".format(e))
-            return False
-        finally:
-            ssh_client.close()
-    else:
-        try:
-            cmd = "crontab -l"
-            out = _remote_exec_command(host_name, username, ssh_key, port,
-                                       ssh_type, command=cmd).splitlines()
-            cronjobs = ["clean_cores.sh", "zip_purge_yb_logs.sh", "yb-server-ctl.sh tserver"]
-            return len(out) != 0 and all(c in out for c in cronjobs)
-        except (YBOpsRuntimeError, Exception) as e:
-            logging.error("Failed to validate cronjobs: {}".format(e))
-            return False
+    try:
+        ssh2_enabled = kwargs.get('ssh2_enabled', False)
+        ssh_client = SSHClient(ssh2_enabled=ssh2_enabled)
+        ssh_client.connect(host_name, username, ssh_key_file, port)
+        stdout= ssh_client.exec_command("crontab -l", output_only=True)
+        cronjobs = ["clean_cores.sh", "zip_purge_yb_logs.sh", "yb-server-ctl.sh tserver"]
+        return all(c in stdout for c in cronjobs)
+    except YBOpsRuntimeError as ex:
+        logging.error("Failed to validate cronjobs: {}".format(ex))
+        return False
+    finally:
+        ssh_client.close_connection()
 
 
 def remote_exec_command(host_name, port, username, ssh_key_file, cmd,
-                        timeout=SSH_TIMEOUT, retries_on_failure=3, retry_delay=SSH_RETRY_DELAY):
+                        retries_on_failure=3, retry_delay=SSH_RETRY_DELAY, **kwargs):
     """This method will execute the given cmd on remote host and return the output.
     Args:
         host_name (str): SSH host IP address
@@ -555,7 +485,8 @@ def remote_exec_command(host_name, port, username, ssh_key_file, cmd,
         logging.info("[app] Attempt #{} to execute remote command..."
                      .format(retries_on_failure + 1))
         try:
-            ssh_client = SSHClient()
+            ssh2_enabled = kwargs.get('ssh2_enabled', False)
+            ssh_client = SSHClient(ssh2_enabled=ssh2_enabled)
             ssh_client.connect(host_name, username, ssh_key_file, port)
             rc, stdout, stderr = ssh_client.exec_command(cmd)
             return rc, stdout, stderr

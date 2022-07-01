@@ -16,7 +16,7 @@ import subprocess
 
 from ybops.common.exceptions import YBOpsRuntimeError
 import ybops.utils as ybutils
-from ybops.utils.ssh import check_ssh2_bin_present, SSH, SSHV2, parse_private_key
+from ybops.utils.ssh import SSH, SSH2, parse_private_key
 
 
 class AnsibleProcess(object):
@@ -80,7 +80,7 @@ class AnsibleProcess(object):
         ask_sudo_pass = vars.pop("ask_sudo_pass", None)
         sudo_pass_file = vars.pop("sudo_pass_file", None)
         ssh_key_file = vars.pop("private_key_file", None)
-        ssh2_bin_present = check_ssh2_bin_present()
+        ssh2_enabled = vars.pop("ssh2_enabled", False)
         ssh_key_type = parse_private_key(ssh_key_file)
 
         playbook_args.update(vars)
@@ -89,7 +89,7 @@ class AnsibleProcess(object):
             playbook_args.update({
                 "ssh_user": ssh_user,
                 "yb_server_ssh_user": ssh_user,
-                "ssh_type": SSH if ssh_key_type == SSH else SSHV2
+                "ssh_type": SSH if ssh_key_type == SSH else SSH2
             })
 
         playbook_args["yb_home_dir"] = ybutils.YB_HOME_DIR
@@ -114,7 +114,7 @@ class AnsibleProcess(object):
             connection_type = "local"
             inventory_target = "localhost,"
         elif self.can_ssh:
-            if ssh2_bin_present:
+            if ssh2_enabled:
                 process_args.extend([
                     "--ssh-extra-args=\"-K%s\"" % (ssh_key_file)
                 ])
@@ -124,7 +124,7 @@ class AnsibleProcess(object):
                 ])
 
             # Hack for ssh-2 server, treats as reserved words
-            if (ssh_user != "centos" and ssh2_bin_present) or not ssh2_bin_present:
+            if (ssh_user != "centos" and ssh2_enabled) or not ssh2_enabled:
                 process_args.extend([
                     "--user", ssh_user
                 ])

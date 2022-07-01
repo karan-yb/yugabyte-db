@@ -12,6 +12,7 @@ package com.yugabyte.yw.common;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.inject.Inject;
+import com.typesafe.config.Config;
 import com.yugabyte.yw.commissioner.Common;
 import com.yugabyte.yw.common.config.RuntimeConfigFactory;
 import com.yugabyte.yw.models.Provider;
@@ -114,6 +115,11 @@ public abstract class DevopsBase {
     Region region = null;
     if (regionUUID != null) {
       region = Region.get(regionUUID);
+    }
+
+    Config config = runtimeConfigFactory.globalRuntimeConf();
+    if (config.getBoolean("yb.security.ssh2_enabled")) {
+      commandList.add("--ssh2_enabled");
     }
 
     Provider provider = null;

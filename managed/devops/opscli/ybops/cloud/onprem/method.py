@@ -79,7 +79,9 @@ class OnPremValidateMethod(AbstractInstancesMethod):
                                 self.extra_vars["ssh_port"],
                                 self.SSH_USER,
                                 args.private_key_file,
-                                self.mount_points.split(',')))
+                                self.mount_points.split(','),
+                                ssh2_enabled=args.ssh2_enabled
+                                ))
 
 
 class OnPremListInstancesMethod(ListInstancesMethod):
@@ -103,7 +105,8 @@ class OnPremListInstancesMethod(ListInstancesMethod):
                 try:
                     ssh_options = {
                         "ssh_user": host_info['ssh_user'],
-                        "private_key_file": args.private_key_file
+                        "private_key_file": args.private_key_file,
+                        "ssh2_enabled": args.ssh2_enabled
                     }
                     ssh_options.update(get_ssh_host_port(
                                         self.cloud.get_host_info(args),
@@ -189,7 +192,7 @@ class OnPremPrecheckInstanceMethod(AbstractInstancesMethod):
                             self.extra_vars["ssh_port"],
                             self.extra_vars["ssh_user"],
                             args.private_key_file,
-                            num_retries=SSH_RETRY_LIMIT_PRECHECK):
+                            num_retries=SSH_RETRY_LIMIT_PRECHECK, ssh2_enabled=args.ssh2_enabled):
                 return host_info
         else:
             raise YBOpsRuntimeError("Unable to find host info.")
@@ -284,7 +287,8 @@ class OnPremPrecheckInstanceMethod(AbstractInstancesMethod):
 
         scp_result = scp_to_tmp(
             get_datafile_path('preflight_checks.sh'), self.extra_vars["private_ip"],
-            self.extra_vars["ssh_user"], self.extra_vars["ssh_port"], args.private_key_file)
+            self.extra_vars["ssh_user"], self.extra_vars["ssh_port"], args.private_key_file,
+            ssh2_enabled=args.ssh2_enabled)
 
         results["SSH Connection"] = scp_result == 0
 
@@ -292,7 +296,8 @@ class OnPremPrecheckInstanceMethod(AbstractInstancesMethod):
             "ssh_user": "yugabyte",
             "ssh_host": self.extra_vars["private_ip"],
             "ssh_port": self.extra_vars["ssh_port"],
-            "private_key_file": args.private_key_file
+            "private_key_file": args.private_key_file,
+            "ssh2_enabled": args.ssh2_enabled
         }
 
         if args.root_cert_path is not None:
@@ -353,7 +358,8 @@ class OnPremPrecheckInstanceMethod(AbstractInstancesMethod):
         self.update_ansible_vars_with_host_info(host_info, args.custom_ssh_port)
         rc, stdout, stderr = remote_exec_command(
             self.extra_vars["private_ip"], self.extra_vars["ssh_port"],
-            self.extra_vars["ssh_user"], args.private_key_file, cmd)
+            self.extra_vars["ssh_user"], args.private_key_file, cmd,
+            ssh2_enabled=args.ssh2_enabled)
 
         if rc != 0:
             results["Preflight Script Error"] = stderr
