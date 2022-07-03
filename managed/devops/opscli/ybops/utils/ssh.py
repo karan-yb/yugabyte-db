@@ -208,6 +208,7 @@ def validated_key_file(key_file):
     if not os.path.exists(key_file):
         raise YBOpsRuntimeError("Key file {} not found.".format(key_file))
 
+    # Check based on key_type not on SSH2 installed or not.
     ssh_type = parse_private_key(key_file)
     if ssh_type == SSH:
         with open(key_file) as f:

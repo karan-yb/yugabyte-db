@@ -64,7 +64,7 @@ class GcpCreateInstancesMethod(CreateInstancesMethod):
 
         ssh_keys = None
         if args.private_key_file is not None:
-            rsa_key = validated_key_file(args.private_key_file)
+            rsa_key, _ = validated_key_file(args.private_key_file)
             public_key = format_rsa_key(rsa_key, public_key=True)
             ssh_keys = "{}:{} {}".format(self.SSH_USER, public_key, self.SSH_USER)
 
