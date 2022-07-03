@@ -365,7 +365,9 @@ class OnPremPrecheckInstanceMethod(AbstractInstancesMethod):
             results["Preflight Script Error"] = stderr
         else:
             # stdout will be returned as a list of lines, which should just be one line of json.
-            stdout = json.loads(stdout[0])
+            if isinstance(stdout, list):
+                stdout = stdout[0]
+            stdout = json.loads(stdout)
             stdout = {k: v == "true" for k, v in iteritems(stdout)}
             results.update(stdout)
 

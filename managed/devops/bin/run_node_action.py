@@ -31,6 +31,7 @@ def add_ssh_subparser(subparsers, command, parent):
     ssh_parser.add_argument('--ip', type=str, help='IP address for ssh',
                             required=True)
     ssh_parser.add_argument('--port', type=int, help='Port number for ssh', default=22)
+    ssh_parser.add_argument('--ssh2_enabled', default=False)
     return ssh_parser
 
 
@@ -214,7 +215,6 @@ def parse_args():
     main_parser.add_argument('--node_name', type=str, help='Node name')
     main_parser.add_argument('--is_master', action='store_true',
                              help='Indicates that node is a master')
-    main_parser.add_argument('--ssh2_enabled', default=False)
     node_type_subparsers = main_parser.add_subparsers(title="node type",
                                                       dest="node_type")
     node_type_subparsers.required = True

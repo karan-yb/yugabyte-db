@@ -163,7 +163,7 @@ class AwsCloud(AbstractCloud):
             raise YBOpsRuntimeError("Key: {} file not found".format(key_file_path))
 
         # This call would throw a exception if the file is not valid key file.
-        rsa_key, _ = validated_key_file(key_file_path)
+        rsa_key = validated_key_file(key_file_path)
 
         # Validate the key pair if name already exists in AWS
         result = list(self.list_key_pair(args).values())[0]

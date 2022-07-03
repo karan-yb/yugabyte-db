@@ -136,7 +136,6 @@ def can_ssh(host_name, port, username, ssh_key_file, **kwargs):
         ssh_client = SSHClient(ssh2_enabled=ssh2_enabled)
         ssh_client.connect(host_name, username, ssh_key_file, port)
         stdout = ssh_client.exec_command("echo 'test'", output_only=True)
-        stdout = stdout.splitlines()
         if len(stdout) == 1 and (stdout[0] == "test"):
             return True
         return False
@@ -326,7 +325,8 @@ class SSHClient(object):
         self.port = ''
         self.client = None
         self.sftp_client = None
-        self.ssh_type = SSH2 if  ssh2_enabled else SSH
+        logging.info("[app], test here ssh2_enabled, {}".format(ssh2_enabled))
+        self.ssh_type = SSH2 if ssh2_enabled else SSH
 
 
     def connect(self, hostname, username, key, port, retry=1, timeout=SSH_TIMEOUT):
