@@ -1174,6 +1174,7 @@ class YBBackup:
             help="Repeatable directory/bucket for a region. For 'create' mode it should be "
                  "related to a '--region'. For 'restore' it's not used.")
 
+        parser.add_argument('--ssh2_enabled', action='store_true', default=False)
         parser.add_argument(
             '--no_auto_name',
             action='store_true',
@@ -1915,6 +1916,9 @@ class YBBackup:
 
     def upload_file_from_local(self, dest_ip, src, dest):
         output = ''
+        ssh_key_flag = '-i'
+        if self.args.ssh2_enabled:
+            ssh_key_flag = '-K'
         if self.is_k8s():
             k8s_details = KubernetesDetails(dest_ip, self.k8s_pod_fqdn_to_cfg)
             output += self.run_program([
@@ -1940,7 +1944,7 @@ class YBBackup:
                         '-S', ssh_wrapper_path,
                         '-o', 'StrictHostKeyChecking=no',
                         '-o', 'UserKnownHostsFile=/dev/null',
-                        '-i', ssh_key_path,
+                        ssh_key_flag, ssh_key_path,
                         '-P', self.args.ssh_port,
                         '-q',
                         src,
@@ -1951,7 +1955,7 @@ class YBBackup:
                     ['scp',
                         '-o', 'StrictHostKeyChecking=no',
                         '-o', 'UserKnownHostsFile=/dev/null',
-                        '-i', ssh_key_path,
+                        ssh_key_flag, ssh_key_path,
                         '-P', self.args.ssh_port,
                         '-q',
                         src,
@@ -1962,6 +1966,9 @@ class YBBackup:
 
     def download_file_to_local(self, src_ip, src, dest):
         output = ''
+        ssh_key_flag = '-i'
+        if self.args.ssh2_enabled:
+            ssh_key_flag = '-K'
         if self.is_k8s():
             k8s_details = KubernetesDetails(src_ip, self.k8s_pod_fqdn_to_cfg)
             output += self.run_program([
@@ -1987,7 +1994,7 @@ class YBBackup:
                         '-S', ssh_wrapper_path,
                         '-o', 'StrictHostKeyChecking=no',
                         '-o', 'UserKnownHostsFile=/dev/null',
-                        '-i', ssh_key_path,
+                        ssh_key_flag, ssh_key_path,
                         '-P', self.args.ssh_port,
                         '-q',
                         '%s@%s:%s' % (self.args.ssh_user, src_ip, src),
@@ -1997,7 +2004,7 @@ class YBBackup:
                     ['scp',
                         '-o', 'StrictHostKeyChecking=no',
                         '-o', 'UserKnownHostsFile=/dev/null',
-                        '-i', ssh_key_path,
+                        ssh_key_flag, ssh_key_path,
                         '-P', self.args.ssh_port,
                         '-q',
                         '%s@%s:%s' % (self.args.ssh_user, src_ip, src),
@@ -2056,6 +2063,9 @@ class YBBackup:
                 ssh_key_path = self.ip_to_ssh_key_map.get(server_ip, ssh_key_path)
             change_user_cmd = 'sudo -u %s' % (self.args.remote_user) \
                 if self.needs_change_user() else ''
+            ssh_key_flag = '-i'
+            if self.args.ssh2_enabled:
+                ssh_key_flag = '-K'
             return self.run_program([
                 'ssh',
                 '-o', 'StrictHostKeyChecking=no',
@@ -2064,7 +2074,7 @@ class YBBackup:
                 '-o', 'ControlMaster=auto',
                 '-o', 'ControlPath=~/.ssh/ssh-%r@%h:%p',
                 '-o', 'ControlPersist=1m',
-                '-i', ssh_key_path,
+                ssh_key_flag, ssh_key_path,
                 '-p', self.args.ssh_port,
                 '-q',
                 '%s@%s' % (self.args.ssh_user, server_ip),

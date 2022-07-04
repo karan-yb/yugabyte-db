@@ -38,6 +38,8 @@ public abstract class DevopsBase {
 
   @Inject RuntimeConfigFactory runtimeConfigFactory;
 
+  @Inject play.Configuration appConfig;
+
   protected JsonNode parseShellResponse(ShellResponse response, String command) {
     if (response.code == 0) {
       return Json.parse(response.message);
@@ -117,8 +119,7 @@ public abstract class DevopsBase {
       region = Region.get(regionUUID);
     }
 
-    Config config = runtimeConfigFactory.globalRuntimeConf();
-    if (config.getBoolean("yb.security.ssh2_enabled")) {
+    if (appConfig.getBoolean("yb.security.ssh2_enabled")) {
       commandArgs.add("--ssh2_enabled");
     }
 

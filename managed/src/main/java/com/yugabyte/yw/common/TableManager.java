@@ -72,6 +72,7 @@ public class TableManager extends DevopsBase {
 
   @Inject ReleaseManager releaseManager;
   @Inject BackupUtil backupUtil;
+  @Inject play.Configuration appConfig;
 
   public ShellResponse runCommand(CommandSubType subType, TableManagerParams taskParams) {
     Universe universe = Universe.getOrBadRequest(taskParams.universeUUID);
@@ -433,6 +434,9 @@ public class TableManager extends DevopsBase {
     }
     if (backupTableParams.disableParallelism) {
       commandArgs.add("--disable_parallelism");
+    }
+    if (appConfig.getBoolean("yb.security.ssh2_enabled")) {
+      commandArgs.add("--ssh2_enabled");
     }
   }
 

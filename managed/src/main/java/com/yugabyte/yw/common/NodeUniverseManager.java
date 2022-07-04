@@ -5,7 +5,6 @@ import com.google.inject.Singleton;
 import com.typesafe.config.Config;
 import com.yugabyte.yw.commissioner.Common;
 import com.yugabyte.yw.common.concurrent.KeyLock;
-import com.yugabyte.yw.common.config.RuntimeConfigFactory;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.Cluster;
 import com.yugabyte.yw.forms.UniverseDefinitionTaskParams.UserIntent;
@@ -30,7 +29,7 @@ public class NodeUniverseManager extends DevopsBase {
   public static final String CERTS_DIR = "/yugabyte-tls-config";
   public static final String K8S_CERTS_DIR = "/opt/certs/yugabyte";
 
-  @Inject RuntimeConfigFactory runtimeConfigFactory;
+  @Inject play.Configuration appConfig;
 
   private final KeyLock<UUID> universeLock = new KeyLock<>();
 
@@ -242,8 +241,7 @@ public class NodeUniverseManager extends DevopsBase {
       commandArgs.add(node.cloudInfo.private_ip);
       commandArgs.add("--key");
       commandArgs.add(getAccessKey(node, universe));
-      Config config = runtimeConfigFactory.globalRuntimeConf();
-      if (config.getBoolean("yb.security.ssh2_enabled")) {
+      if (appConfig.getBoolean("yb.security.ssh2_enabled")) {
         commandArgs.add("--ssh2_enabled");
       }
     } else {
