@@ -31,7 +31,7 @@ def add_ssh_subparser(subparsers, command, parent):
     ssh_parser.add_argument('--ip', type=str, help='IP address for ssh',
                             required=True)
     ssh_parser.add_argument('--port', type=int, help='Port number for ssh', default=22)
-    ssh_parser.add_argument('--ssh2_enabled', default=False)
+    ssh_parser.add_argument('--ssh2_enabled', action='store_true', default=False)
     return ssh_parser
 
 
@@ -118,7 +118,7 @@ def download_file_ssh(args, client):
     # Execute shell script on remote server and download the file to archive
     script_output = client.exec_script("./bin/node_utils.sh", ["create_tar_file"] + cmd)
     file_exists = client.exec_script("./bin/node_utils.sh",
-                                        ["check_file_exists", tar_file_name]).strip()
+                                     ["check_file_exists", tar_file_name]).strip()
 
     print(f"Shell script output : {script_output}")
 

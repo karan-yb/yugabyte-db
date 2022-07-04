@@ -233,11 +233,6 @@ public class NodeUniverseManager extends DevopsBase {
       commandArgs.add("--kubeconfig");
       commandArgs.add(kubeconfig);
     } else if (!universe.getNodeDeploymentMode(node).equals(Common.CloudType.unknown)) {
-      Config config = runtimeConfigFactory.globalRuntimeConf();
-      if (config.getBoolean("yb.security.ssh2_enabled")) {
-        commandArgs.add("--ssh2_enabled");
-      }
-
       AccessKey accessKey =
           AccessKey.getOrBadRequest(providerUUID, cluster.userIntent.accessKeyCode);
       commandArgs.add("ssh");
@@ -247,6 +242,10 @@ public class NodeUniverseManager extends DevopsBase {
       commandArgs.add(node.cloudInfo.private_ip);
       commandArgs.add("--key");
       commandArgs.add(getAccessKey(node, universe));
+      Config config = runtimeConfigFactory.globalRuntimeConf();
+      if (config.getBoolean("yb.security.ssh2_enabled")) {
+        commandArgs.add("--ssh2_enabled");
+      }
     } else {
       throw new RuntimeException("Cloud type unknown");
     }

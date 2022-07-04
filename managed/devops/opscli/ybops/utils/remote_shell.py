@@ -18,8 +18,6 @@ CONNECTION_ATTEMPTS = 5
 CONNECTION_ATTEMPT_DELAY_SEC = 3
 
 
-
-
 class RemoteShell(object):
     """RemoteShell class is used run remote shell commands against nodes using fabric.
     """

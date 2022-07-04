@@ -380,6 +380,7 @@ class OnPremFillInstanceProvisionTemplateMethod(AbstractMethod):
         super(OnPremFillInstanceProvisionTemplateMethod, self).__init__(base_command, 'template')
 
     def add_extra_args(self):
+        super(OnPremFillInstanceProvisionTemplateMethod, self).add_extra_args()
         self.parser.add_argument('--name', default='provision_instance.py', required=False,
                                  help='Desired name for the new provision instance script')
         self.parser.add_argument('--destination', required=True,
@@ -390,10 +391,6 @@ class OnPremFillInstanceProvisionTemplateMethod(AbstractMethod):
         # to 22, without breaking...
         self.parser.add_argument('--custom_ssh_port', required=False, default=22,
                                  help='The port on which to SSH into the instance.')
-        self.parser.add_argument('--vars_file', required=True,
-                                 help='The vault file containing needed vars.')
-        self.parser.add_argument('--vault_password_file', required=True,
-                                 help='The password file to unlock the vault file.')
         self.parser.add_argument('--local_package_path', required=True,
                                  help='Path to the local third party dependency packages.')
         self.parser.add_argument('--private_key_file', required=True,

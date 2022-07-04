@@ -260,7 +260,8 @@ class AbstractCloud(AbstractCommandParser):
         # Verify that the command ran successfully:
         rc, stdout, stderr = remote_exec_command(extra_vars["ssh_host"], extra_vars["ssh_port"],
                                                  extra_vars["ssh_user"], args.private_key_file,
-                                                 'ls /tmp/dhclient-script-*', ssh2_enabled=args.ssh2_enabled)
+                                                 'ls /tmp/dhclient-script-*',
+                                                 ssh2_enabled=args.ssh2_enabled)
         if rc:
             raise YBOpsRuntimeError(
                 "Second nic not configured at start up")

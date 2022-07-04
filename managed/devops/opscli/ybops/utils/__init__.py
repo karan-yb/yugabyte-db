@@ -425,7 +425,8 @@ def validate_instance(host_name, port, username, ssh_key_file, mount_paths, **kw
             if len(stdout) == 0:
                 return ValidationResult.INVALID_MOUNT_POINTS
 
-        _, output, _ = ssh_client.exec_command("source /etc/os-release && echo \"$NAME $VERSION_ID\"")
+        os_check_cmd = "source /etc/os-release && echo \"$NAME $VERSION_ID\""
+        _, output, _ = ssh_client.exec_command(os_check_cmd)
         if len(output) == 0 or output[0].strip().lower() != "centos linux 7":
             return ValidationResult.INVALID_OS
 
@@ -454,7 +455,7 @@ def validate_cron_status(host_name, port, username, ssh_key_file, **kwargs):
         ssh2_enabled = kwargs.get('ssh2_enabled', False)
         ssh_client = SSHClient(ssh2_enabled=ssh2_enabled)
         ssh_client.connect(host_name, username, ssh_key_file, port)
-        stdout= ssh_client.exec_command("crontab -l", output_only=True)
+        stdout = ssh_client.exec_command("crontab -l", output_only=True)
         cronjobs = ["clean_cores.sh", "zip_purge_yb_logs.sh", "yb-server-ctl.sh tserver"]
         return all(c in stdout for c in cronjobs)
     except YBOpsRuntimeError as ex:

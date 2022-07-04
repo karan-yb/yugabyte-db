@@ -83,7 +83,7 @@
     remote_src: yes
     src: "/home/{{ ssh_user }}/.ssh2/authorized_keys"
     dest: "/home/{{ create_user.name }}/.ssh2"
-    owner: "{{ create_user.name }}"
+    owner: "{{ create_user.group }}"
     mode: 0400
   become: yes
   tags: yb-prebuilt-ami

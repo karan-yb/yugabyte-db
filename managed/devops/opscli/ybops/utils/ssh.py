@@ -85,7 +85,7 @@ def parse_private_key(key):
 
 def run_command(args, num_retry=1, timeout=1, **kwargs):
     cmd_as_str = quote_cmd_line_for_bash(args)
-    logging.info("[app] Executing command \"{}\" on the remote server".format(cmd_as_str))
+    logging.info("[app] Executing command \"{}\"".format(cmd_as_str))
     while num_retry > 0:
         num_retry = num_retry - 1
         try:
@@ -136,6 +136,7 @@ def can_ssh(host_name, port, username, ssh_key_file, **kwargs):
         ssh_client = SSHClient(ssh2_enabled=ssh2_enabled)
         ssh_client.connect(host_name, username, ssh_key_file, port)
         stdout = ssh_client.exec_command("echo 'test'", output_only=True)
+        stdout = stdout.splitlines()
         if len(stdout) == 1 and (stdout[0] == "test"):
             return True
         return False
@@ -315,8 +316,8 @@ def get_ssh_host_port(host_info, custom_port, default_port=False):
 class SSHClient(object):
     '''
         Base SSH Class Library. Handles invoking the paramiko in case
-        the OpenSSH keys are used for initialization, 
-        invokes native ssh command otherwise. 
+        the OpenSSH keys are used for initialization,
+        invokes native ssh command otherwise.
     '''
     def __init__(self, ssh2_enabled=False):
         self.hostname = ''
@@ -325,9 +326,7 @@ class SSHClient(object):
         self.port = ''
         self.client = None
         self.sftp_client = None
-        logging.info("[app], test here ssh2_enabled, {}".format(ssh2_enabled))
         self.ssh_type = SSH2 if ssh2_enabled else SSH
-
 
     def connect(self, hostname, username, key, port, retry=1, timeout=SSH_TIMEOUT):
         '''
@@ -352,7 +351,7 @@ class SSHClient(object):
                     return
                 except socket.error as ex:
                     logging.info("[app] Failed to establish SSH connection to {}:{} - {}"
-                                .format(self.ip, self.port, str(ex)))
+                                 .format(self.ip, self.port, str(ex)))
                     attempt += 1
                     if attempt >= retry:
                         raise YBOpsRuntimeError(ex)
@@ -362,7 +361,6 @@ class SSHClient(object):
             self.username = username
             self.key = key
             self.port = port
-
 
     def exec_command(self, cmd, **kwargs):
         '''
@@ -378,7 +376,8 @@ class SSHClient(object):
                 # Need to join with spaces, but surround arguments with spaces using "'" character
                 command = ' '.join(
                     list(map(lambda part: part if ' ' not in part else "'" + part + "'", cmd)))
-            logging.info("[app] Executing command on the remote server {}, {}".format(command, self.client))
+            logging.info("[app] Executing command on the remote server \
+                         {}, {}".format(command, self.client))
             _, stdout, stderr = self.client.exec_command(command)
             if not output_only:
                 return stdout.channel.recv_exit_status(), stdout.readlines(), stderr.readlines()
@@ -387,17 +386,19 @@ class SSHClient(object):
                 if return_code != 0:
                     error = self.read_output(stderr)
                     raise YBOpsRuntimeError('Command \'{}\' returned error code {}: {}'
-                                    .format(command, return_code, error))
+                                            .format(command, return_code, error))
                 output = self.read_output(stdout)
                 return output
         else:
-            cmd = self.__generate_shell_command(self.hostname, self.port, self.username, self.key, command=cmd)
+            cmd = self.__generate_shell_command(
+                self.hostname,
+                self.port, self.username,
+                self.key, command=cmd)
             output = run_command(cmd)
             if not output_only:
                 return 0, output, None
             else:
                 return output
-
 
     def close_connection(self):
         '''
@@ -406,7 +407,6 @@ class SSHClient(object):
         '''
         if self.ssh_type == SSH:
             self.client.close()
-
 
     def get_sftp_client(self):
         '''
@@ -417,12 +417,13 @@ class SSHClient(object):
             self.sftp_client = self.client.open_sftp()
             return self.sftp_client
 
-
-    # We saw this script hang. The only place which can hang in theory is ssh command execution
-    # and reading it's results.
-    # Applied one of described workaround from this issue:
-    # https://github.com/paramiko/paramiko/issues/109
     def read_output(self, stream):
+        '''
+        We saw this script hang. The only place which can hang in theory is ssh command execution
+        and reading it's results.
+        Applied one of described workaround from this issue:
+        https://github.com/paramiko/paramiko/issues/109
+        '''
         end_time = time.time() + COMMAND_TIMEOUT_SEC
         while not stream.channel.eof_received:
             time.sleep(1)
@@ -430,7 +431,6 @@ class SSHClient(object):
                 stream.channel.close()
             break
         return stream.read().decode()
-
 
     def exec_script(self, local_script_name, params):
         '''
@@ -451,7 +451,6 @@ class SSHClient(object):
 
         return stdout
 
-
     def download_file_from_remote_server(self, remote_file_name, local_file_name):
         '''
             Function to download a file from remote server on the local machine.
@@ -466,11 +465,12 @@ class SSHClient(object):
             finally:
                 self.sftp_client.close()
         else:
-            cmd = self.__generate_shell_command(self.hostname, self.port, self.username, self.key, src_filepath=remote_file_name,
-                                           dest_filepath=local_file_name,
-                                           get_from_remote=True)
+            cmd = self.__generate_shell_command(self.hostname, self.port,
+                                                self.username, self.key,
+                                                src_filepath=remote_file_name,
+                                                dest_filepath=local_file_name,
+                                                get_from_remote=True)
             run_command(cmd)
-
 
     def upload_file_to_remote_server(self, local_file_name, remote_file_name):
         '''
@@ -486,8 +486,10 @@ class SSHClient(object):
             finally:
                 self.sftp_client.close()
         else:
-            cmd = self.__generate_shell_command(self.hostname, self.port, self.username, self.key, src_filepath=local_file_name,
-                                           dest_filepath=remote_file_name)
+            cmd = self.__generate_shell_command(self.hostname, self.port,
+                                                self.username, self.key,
+                                                src_filepath=local_file_name,
+                                                dest_filepath=remote_file_name)
             run_command(cmd)
 
     def __generate_shell_command(self, host_name, port, username, ssh_key_file, **kwargs):
