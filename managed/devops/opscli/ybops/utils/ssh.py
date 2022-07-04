@@ -85,7 +85,7 @@ def parse_private_key(key):
 
 def run_command(args, num_retry=1, timeout=1, **kwargs):
     cmd_as_str = quote_cmd_line_for_bash(args)
-    logging.info("[app] Executing command \"{}\" on the remote server".format(cmd_as_str))
+    logging.info("[app] Executing command \"{}\"".format(cmd_as_str))
     while num_retry > 0:
         num_retry = num_retry - 1
         try:
@@ -136,6 +136,7 @@ def can_ssh(host_name, port, username, ssh_key_file, **kwargs):
         ssh_client = SSHClient(ssh2_enabled=ssh2_enabled)
         ssh_client.connect(host_name, username, ssh_key_file, port)
         stdout = ssh_client.exec_command("echo 'test'", output_only=True)
+        stdout = stdout.splitlines()
         if len(stdout) == 1 and (stdout[0] == "test"):
             return True
         return False
@@ -325,7 +326,6 @@ class SSHClient(object):
         self.port = ''
         self.client = None
         self.sftp_client = None
-        logging.info("[app], test here ssh2_enabled, {}".format(ssh2_enabled))
         self.ssh_type = SSH2 if ssh2_enabled else SSH
 
 

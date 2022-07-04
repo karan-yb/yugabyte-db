@@ -31,7 +31,7 @@ def add_ssh_subparser(subparsers, command, parent):
     ssh_parser.add_argument('--ip', type=str, help='IP address for ssh',
                             required=True)
     ssh_parser.add_argument('--port', type=int, help='Port number for ssh', default=22)
-    ssh_parser.add_argument('--ssh2_enabled', default=False)
+    ssh_parser.add_argument('--ssh2_enabled', action='store_true', default=False)
     return ssh_parser
 
 

@@ -119,7 +119,7 @@ public abstract class DevopsBase {
 
     Config config = runtimeConfigFactory.globalRuntimeConf();
     if (config.getBoolean("yb.security.ssh2_enabled")) {
-      commandList.add("--ssh2_enabled");
+      commandArgs.add("--ssh2_enabled");
     }
 
     Provider provider = null;

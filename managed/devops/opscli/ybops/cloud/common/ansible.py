@@ -82,7 +82,6 @@ class AnsibleProcess(object):
         ssh_key_file = vars.pop("private_key_file", None)
         ssh2_enabled = vars.pop("ssh2_enabled", False)
         ssh_key_type = parse_private_key(ssh_key_file)
-        logging.info("[app], test here ssh2_enabled in ansible, {}".format(ssh2_enabled))
 
         playbook_args.update(vars)
 

@@ -729,7 +729,7 @@ class ProvisionInstancesMethod(AbstractInstancesMethod):
         ansible = self.cloud.setup_ansible(args)
         ansible.run("preprovision.yml", self.extra_vars, host_info)
 
-        if not args.disable_custom_ssh and use_default_port:
+        if not args.disable_custom_ssh and use_default_port and not args.ssh2_enabled:
             ansible.run("use_custom_ssh_port.yml", self.extra_vars, host_info)
 
 
