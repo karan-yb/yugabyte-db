@@ -238,7 +238,8 @@ def main():
         try:
             client.connect(args.ip, YB_USERNAME, args.key, args.port)
         except Exception as e:
-            sys.exit("Failed to establish SSH connection to {}:{} - {}")
+            sys.exit("Failed to establish SSH connection to {}:{} - {}"
+                     .format(args.ip, args.port, str(e)))
     elif args.node_type != 'ssh':
         client = KubernetesClient(args)
 
