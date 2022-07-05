@@ -39,6 +39,8 @@ public class CloudQueryHelperTest extends FakeDBApplication {
 
   @Mock Config mockConfig;
 
+  @Mock play.Configuration appConfig;
+
   private Customer defaultCustomer;
   private Provider defaultProvider;
   private Region defaultRegion;

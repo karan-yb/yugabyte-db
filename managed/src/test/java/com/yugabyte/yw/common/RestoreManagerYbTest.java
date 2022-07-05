@@ -49,6 +49,8 @@ public class RestoreManagerYbTest extends FakeDBApplication {
 
   @Mock ShellProcessHandler shellProcessHandler;
 
+  @Mock play.Configuration appConfig;
+
   @InjectMocks RestoreManagerYb restoreManagerYb;
 
   private Provider testProvider;

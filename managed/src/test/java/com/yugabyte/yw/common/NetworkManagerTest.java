@@ -32,6 +32,8 @@ public class NetworkManagerTest extends FakeDBApplication {
 
   @Mock ShellProcessHandler shellProcessHandler;
 
+  @Mock play.Configuration appConfig;
+
   private Provider defaultProvider;
   private Region defaultRegion;
   ArgumentCaptor<List<String>> command;
