@@ -72,15 +72,15 @@ def parse_private_key(key):
     raise YBOpsRuntimeError("Specified key format is not supported.")
 
 
-# def check_ssh2_bin_present():
-#     """Checks if the ssh2 is installed on the node
-#     :return: True/False
-#     """
-#     try:
-#         output = run_command(['command', '-v', '/usr/bin/sshg3', '/dev/null'])
-#         return True if output is not None else False
-#     except YBOpsRuntimeError as e:
-#         return False
+def check_ssh2_bin_present():
+    """Checks if the ssh2 is installed on the node
+    :return: True/False
+    """
+    try:
+        output = run_command(['command', '-v', '/usr/bin/sshg3', '/dev/null'])
+        return True if output is not None else False
+    except YBOpsRuntimeError as e:
+        return False
 
 
 def run_command(args, num_retry=1, timeout=1, **kwargs):
@@ -267,24 +267,39 @@ def scp_to_tmp(filepath, host, user, port, private_key, **kwargs):
         "-vvvv",
         filepath, "{}@{}:{}".format(user, host, dest_path)
     ]
-    # Save the debug output to temp files.
-    out_fd, out_name = tempfile.mkstemp(text=True)
-    err_fd, err_name = tempfile.mkstemp(text=True)
-    # Start the scp and redirect out and err.
-    proc = subprocess.Popen(scp_cmd, stdout=out_fd, stderr=err_fd)
-    # Wait for finish and cleanup FDs.
-    proc.wait()
-    os.close(out_fd)
-    os.close(err_fd)
-    # In case of errors, copy over the tmp output.
-    if proc.returncode != 0:
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        shutil.copyfile(out_name, "/tmp/{}-{}.out".format(host, timestamp))
-        shutil.copyfile(err_name, "/tmp/{}-{}.err".format(host, timestamp))
-    # Cleanup the temp files now that they are clearly not needed.
-    os.remove(out_name)
-    os.remove(err_name)
-    return proc.returncode
+
+    rc = 0
+    while retries > 0:
+        # Save the debug output to temp files.
+        out_fd, out_name = tempfile.mkstemp(text=True)
+        err_fd, err_name = tempfile.mkstemp(text=True)
+        # Start the scp and redirect out and err.
+        proc = subprocess.Popen(scp_cmd, stdout=out_fd, stderr=err_fd)
+        # Wait for finish and cleanup FDs.
+        proc.wait()
+        os.close(out_fd)
+        os.close(err_fd)
+        rc = proc.returncode
+
+        # In case of errors, copy over the tmp output.
+        if rc != 0:
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            basename = f"/tmp/{host}-{timestamp}"
+            logging.warning(f"Command '{' '.join(scp_cmd)}' failed with exit code {rc}")
+
+            for ext, name in {'out': out_name, 'err': err_name}.items():
+                logging.warning(f"Dumping std{ext} to {basename}.{ext}")
+                shutil.move(name, f"{basename}.out")
+
+            retries -= 1
+            time.sleep(retry_delay)
+        else:
+            # Cleanup the temp files now that they are clearly not needed.
+            os.remove(out_name)
+            os.remove(err_name)
+            break
+
+    return rc
 
 
 def get_public_key_content(private_key_file):
@@ -326,7 +341,7 @@ class SSHClient(object):
         self.port = ''
         self.client = None
         self.sftp_client = None
-        self.ssh_type = SSH2 if ssh2_enabled else SSH
+        self.ssh_type = SSH2 if ssh2_enabled and check_ssh2_bin_present() else SSH
 
     def connect(self, hostname, username, key, port, retry=1, timeout=SSH_TIMEOUT):
         '''

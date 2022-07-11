@@ -10,6 +10,7 @@ import com.yugabyte.yw.common.Util;
 import com.yugabyte.yw.forms.UpgradeTaskParams;
 import com.yugabyte.yw.forms.UpgradeTaskParams.UpgradeOption;
 import com.yugabyte.yw.models.Universe;
+import com.yugabyte.yw.models.HookScope.TriggerType;
 import com.yugabyte.yw.models.helpers.NodeDetails;
 import com.yugabyte.yw.models.helpers.NodeDetails.NodeState;
 import com.yugabyte.yw.models.helpers.PlacementInfo.PlacementAZ;
@@ -20,6 +21,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -49,6 +51,7 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
   protected boolean isLoadBalancerOn = true;
   protected boolean isBlacklistLeaders;
   protected int leaderBacklistWaitTimeMs;
+  protected boolean hasRollingUpgrade = false;
 
   protected UpgradeTaskBase(BaseTaskDependencies baseTaskDependencies) {
     super(baseTaskDependencies);
@@ -79,8 +82,16 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
       // 'updateInProgress' flag to prevent other updates from happening.
       lockUniverseForUpdate(taskParams().expectedUniverseVersion);
 
+      Set<NodeDetails> nodeList = toOrderedSet(fetchNodes(taskParams().upgradeOption));
+
+      // Run the pre-upgrade hooks
+      createHookTriggerTasks(nodeList, true, false);
+
       // Execute the lambda which populates subTaskGroupQueue
       upgradeLambda.run();
+
+      // Run the post-upgrade hooks
+      createHookTriggerTasks(nodeList, false, false);
 
       // Marks update of this universe as a success only if all the tasks before it succeeded.
       createMarkUniverseUpdateSuccessTasks()
@@ -104,7 +115,7 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
       throw t;
     } finally {
       try {
-        if (isBlacklistLeaders) {
+        if (isBlacklistLeaders && hasRollingUpgrade) {
           // This clears all the previously added subtasks.
           getRunnableTask().reset();
           List<NodeDetails> tServerNodes = fetchTServerNodes(taskParams().upgradeOption);
@@ -211,7 +222,7 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
     if ((nodes == null) || nodes.isEmpty()) {
       return;
     }
-
+    hasRollingUpgrade = true;
     SubTaskGroupType subGroupType = getTaskSubGroupType();
     Map<NodeDetails, Set<ServerType>> typesByNode = new HashMap<>();
     boolean hasTServer = false;
@@ -239,6 +250,8 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
       List<NodeDetails> singletonNodeList = Collections.singletonList(node);
       boolean isLeaderBlacklistValidRF = isLeaderBlacklistValidRF(node.nodeName);
       createSetNodeStateTask(node, nodeState).setSubTaskGroupType(subGroupType);
+      // Run pre node upgrade hooks
+      createHookTriggerTasks(singletonNodeList, true, true);
       if (context.runBeforeStopping) {
         rollingUpgradeLambda.run(singletonNodeList, processTypes);
       }
@@ -290,6 +303,9 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
           createWaitForFollowerLagTask(node, processType).setSubTaskGroupType(subGroupType);
         }
       }
+
+      // Run post node upgrade hooks
+      createHookTriggerTasks(singletonNodeList, false, true);
 
       createSetNodeStateTask(node, NodeState.Live).setSubTaskGroupType(subGroupType);
     }
@@ -391,7 +407,7 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
     createNonRestartUpgradeTaskFlow(nonRestartUpgradeLambda, tServerNodes, ServerType.TSERVER);
   }
 
-  private void createNonRestartUpgradeTaskFlow(
+  protected void createNonRestartUpgradeTaskFlow(
       IUpgradeSubTask nonRestartUpgradeLambda, List<NodeDetails> nodes, ServerType processType) {
     if ((nodes == null) || nodes.isEmpty()) {
       return;
@@ -553,6 +569,16 @@ public abstract class UpgradeTaskBase extends UniverseDefinitionTaskBase {
                     })
                 .thenComparing(NodeDetails::getNodeIdx))
         .collect(Collectors.toList());
+  }
+
+  // Get the TriggerType for the given situation and trigger the hooks
+  private void createHookTriggerTasks(
+      Collection<NodeDetails> nodes, boolean isPre, boolean isRolling) {
+    String triggerName = (isPre ? "Pre" : "Post") + this.getClass().getSimpleName();
+    if (isRolling) triggerName += "NodeUpgrade";
+    Optional<TriggerType> optTrigger = TriggerType.maybeResolve(triggerName);
+    if (optTrigger.isPresent())
+      HookInserter.addHookTrigger(optTrigger.get(), this, taskParams(), nodes);
   }
 
   @Value

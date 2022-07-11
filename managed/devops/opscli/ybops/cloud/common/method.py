@@ -30,6 +30,7 @@ from ansible_vault import Vault
 from ybops.utils.ssh import wait_for_ssh, format_rsa_key, validated_key_file, \
     generate_rsa_keypair, scp_to_tmp, get_public_key_content, \
     get_ssh_host_port, DEFAULT_SSH_USER
+from ybops.utils import remote_exec_command
 
 
 class ConsoleLoggingErrorHandler(object):
@@ -1007,7 +1008,8 @@ class ConfigureInstancesMethod(AbstractInstancesMethod):
         self.parser.add_argument('--gcs_credentials_json')
         self.parser.add_argument('--http_remote_download', action="store_true")
         self.parser.add_argument('--http_package_checksum', default='')
-
+        self.parser.add_argument('--update_packages', action="store_true", default=False)
+        self.parser.add_argument('--ssh_user_update_packages')
         # Development flag for itests.
         self.parser.add_argument('--itest_s3_package_path',
                                  help="Path to download packages for itest. Only for AWS/onprem.")
@@ -1224,7 +1226,15 @@ class ConfigureInstancesMethod(AbstractInstancesMethod):
                             logging.info("[app] Copying package {} to {} took {:.3f} sec".format(
                                 ybc_package_path, args.search_pattern, time.time() - start_time))
 
-        logging.info("Configuring Instance: {}".format(args.search_pattern))
+        # Update packages as "sudo" user as part of software upgrade.
+        if args.update_packages:
+            # Defaulting to sudo user, in case not provided as part of seeting up provider
+            self.extra_vars["ssh_user"] = args.ssh_user_update_packages if \
+                args.ssh_user_update_packages else self.SSH_USER
+            self.cloud.setup_ansible(args).run(
+                "reinstall-package.yml", self.extra_vars, host_info)
+            # Falling back to "yugabyte" user
+            self.extra_vars["ssh_user"] = self.get_ssh_user()
         ssh_options = {
             # TODO: replace with args.ssh_user when it's setup in the flow
             "ssh_user": self.get_ssh_user(),
@@ -1621,3 +1631,94 @@ class RebootInstancesMethod(AbstractInstancesMethod):
                                 args.private_key_file,
                                 'sudo reboot', ssh2_enabled=args.ssh2_enabled)
         self.wait_for_host(args, False)
+
+
+class RunHooks(AbstractInstancesMethod):
+    def __init__(self, base_command):
+        super(RunHooks, self).__init__(base_command, "runhooks")
+
+    def add_extra_args(self):
+        super(RunHooks, self).add_extra_args()
+        self.parser.add_argument("--execution_lang", required=True,
+                                 help="The execution language to use.")
+        self.parser.add_argument("--trigger", required=True,
+                                 help="The event that triggered this hook to run.")
+        self.parser.add_argument("--hook_path", required=True,
+                                 help="The path to the script on the Anywhere instance.")
+        self.parser.add_argument("--use_sudo", action="store_true", default=False,
+                                 help="Use superuser privileges while executing custom hook.")
+        self.parser.add_argument("--parent_task", required=True,
+                                 help="The parent task running the hook.")
+        self.parser.add_argument("--runtime_args", help="The parent task running the hook.")
+
+    def _verify_params(self, args):
+        if args.execution_lang not in ['Bash', 'Python']:
+            raise YBOpsRuntimeError("--execution_lang {} is not valid. Must be Bash or Python",
+                                    args.execution_lang)
+
+    def get_exec_command(self, args):
+        dest_path = os.path.join("/tmp", os.path.basename(args.hook_path))
+        lang_command = args.execution_lang.lower()
+
+        cmd = "sudo " if args.use_sudo else ""
+        cmd += "{} {} --parent_task {} --trigger {}".format(lang_command, dest_path,
+                                                            args.parent_task, args.trigger)
+
+        # Add extra runtime arguments
+        if args.runtime_args is not None:
+            runtime_args_json = json.loads(args.runtime_args)
+            for key, value in runtime_args_json.items():
+                cmd += " --{} {}".format(key, value)
+
+        return cmd
+
+    def callback(self, args):
+        self._verify_params(args)
+        ssh_user = "yugabyte"
+        use_default_port = args.trigger == 'PreNodeProvision'
+
+        # Use the SSH user if:
+        # 1. Sudo permissions are needed
+        # 2. Before provisioning, since the yugabyte user has not been created
+        if args.use_sudo or args.trigger == 'PreNodeProvision':
+            if args.ssh_user is not None:
+                ssh_user = args.ssh_user
+            else:
+                ssh_user = DEFAULT_SSH_USER
+
+        host_info = self.cloud.get_host_info(args)
+        self.extra_vars.update(
+            get_ssh_host_port(host_info, args.custom_ssh_port, default_port=use_default_port))
+        self.extra_vars.update({"ssh_user": ssh_user})
+        self.wait_for_host(args, use_default_port)
+
+        # Copy the hook to the remote node
+        scp_result = scp_to_tmp(
+                        args.hook_path,
+                        self.extra_vars["ssh_host"],
+                        self.extra_vars["ssh_user"],
+                        self.extra_vars["ssh_port"],
+                        args.private_key_file)
+        if scp_result:
+            raise YBOpsRuntimeError("Could not transfer hook to target node.")
+
+        # Execute hook on remote node
+        rc, stdout, stderr = remote_exec_command(
+                                self.extra_vars["ssh_host"],
+                                self.extra_vars["ssh_port"],
+                                self.extra_vars["ssh_user"],
+                                args.private_key_file,
+                                self.get_exec_command(args))
+        if rc:
+            raise YBOpsRuntimeError("Failed running custom hook:\n" + ''.join(stderr))
+
+        # Delete custom hook
+        remove_command = "rm " + os.path.join("/tmp", os.path.basename(args.hook_path))
+        rc, stdout, stderr = remote_exec_command(
+                                self.extra_vars["ssh_host"],
+                                self.extra_vars["ssh_port"],
+                                self.extra_vars["ssh_user"],
+                                args.private_key_file,
+                                remove_command)
+        if rc:
+            logging.warn("Failed deleting custom hook:\n" + ''.join(stderr))

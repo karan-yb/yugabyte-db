@@ -16,7 +16,7 @@ import subprocess
 
 from ybops.common.exceptions import YBOpsRuntimeError
 import ybops.utils as ybutils
-from ybops.utils.ssh import SSH, SSH2, parse_private_key
+from ybops.utils.ssh import SSH, SSH2, parse_private_key, check_ssh2_bin_present
 
 
 class AnsibleProcess(object):
@@ -80,7 +80,7 @@ class AnsibleProcess(object):
         ask_sudo_pass = vars.pop("ask_sudo_pass", None)
         sudo_pass_file = vars.pop("sudo_pass_file", None)
         ssh_key_file = vars.pop("private_key_file", None)
-        ssh2_enabled = vars.pop("ssh2_enabled", False)
+        ssh2_enabled = vars.pop("ssh2_enabled", False) and check_ssh2_bin_present()
         ssh_key_type = parse_private_key(ssh_key_file)
 
         playbook_args.update(vars)

@@ -1491,8 +1491,7 @@ pg_get_indexdef_worker(Oid indexrelid, int colno,
 		if (includeYbMetadata && IsYBRelation(indexrel) &&
 			!idxrec->indisprimary)
 		{
-			YbLoadTablePropertiesIfNeeded(indexrel, false /* allow_missing */);
-			YbAppendIndexReloptions(buf, indexrelid, indexrel->yb_table_properties);
+			YbAppendIndexReloptions(buf, indexrelid, YbGetTableProperties(indexrel));
 		}
 
 		/*
@@ -1547,7 +1546,8 @@ pg_get_indexdef_worker(Oid indexrelid, int colno,
 			 * index table, this is a leftover from beta days of tablegroup
 			 * feature. We cannot replicate this via DDL statement anymore.
 			 */
-			if (indexrel->yb_table_properties->tablegroup_oid != RelationGetTablegroupOid(indrel))
+			if (YbGetTableProperties(indexrel)->tablegroup_oid !=
+				YbGetTableProperties(indrel)->tablegroup_oid)
 			{
 				ereport(ERROR,
 						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -2253,9 +2253,7 @@ pg_get_constraintdef_worker(Oid constraintId, bool fullCommand,
 					Relation indexrel = index_open(indexId, AccessShareLock);
 
 					if (IsYBRelation(indexrel) && conForm->contype != CONSTRAINT_PRIMARY)
-						YbLoadTablePropertiesIfNeeded(indexrel, false /* allow_missing */);
-
-					YbAppendIndexReloptions(buf, indexId, indexrel->yb_table_properties);
+						YbAppendIndexReloptions(buf, indexId, YbGetTableProperties(indexrel));
 
 					Oid			tblspc;
 
