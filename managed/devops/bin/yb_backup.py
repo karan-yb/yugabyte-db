@@ -2074,9 +2074,7 @@ class YBBackup:
                 ssh_key_path = self.ip_to_ssh_key_map.get(server_ip, ssh_key_path)
             change_user_cmd = 'sudo -u %s' % (self.args.remote_user) \
                 if self.needs_change_user() else ''
-            ssh_key_flag = '-i'
-            if self.args.ssh2_enabled:
-                ssh_key_flag = '-K'
+            ssh_key_flag = '-K' if self.args.ssh2_enabled else '-i'
             return self.run_program([
                 'ssh',
                 '-o', 'StrictHostKeyChecking=no',
@@ -3022,7 +3020,10 @@ class YBBackup:
                     compare_checksums_cmd(checksum_downloaded, self.checksum_path(target_path)),
                     server_ip).strip()
 
-        if (not self.args.disable_checksums) and (check_checksum_res != 'correct' or (self.args.ssh2_enabled and 'correct' not in check_checksum_res)):
+        # Todo: Fix the condition. Will be fixed, as part of migration of common
+        # ssh_librabry(yugabyte-db/managed/devops/opscli/ybops/utils/ssh.py).
+        if (not self.args.disable_checksums) and (check_checksum_res != 'correct'
+            and (self.args.ssh2_enabled and 'correct' not in check_checksum_res)):
             raise BackupException('Check-sum for {} is {}'.format(
                 target_path, check_checksum_res))
 
@@ -3144,6 +3145,11 @@ class YBBackup:
                 old_db_name = self.run_program(cmd).strip()
             else:
                 old_db_name = self.run_ssh_cmd(cmd, self.get_main_host_ip()).strip()
+
+            if self.args.ssh2_enabled:
+                 # Todo: Fix the condition. Will be fixed, as part of migration of common
+                 # ssh_librabry(yugabyte-db/managed/devops/opscli/ybops/utils/ssh.py).
+                old_db_name = old_db_name.splitlines()[-1]
 
             if old_db_name:
                 new_db_name = keyspace_name(self.args.keyspace[0])
