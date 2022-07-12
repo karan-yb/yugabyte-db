@@ -110,23 +110,22 @@ class AnsibleProcess(object):
         elif tags is not None:
             process_args.extend(["--tags", tags])
 
+        process_args.extend([
+            "--user", ssh_user
+        ])
+
         if ssh_port is None or ssh_host is None:
             connection_type = "local"
             inventory_target = "localhost,"
         elif self.can_ssh:
             if ssh2_enabled:
                 process_args.extend([
-                    "--ssh-extra-args=\"-K%s\"" % (ssh_key_file)
+                    '--ssh-common-args=\'-K%s\'' %(ssh_key_file),
+                    '--ssh-extra-args=\'-l%s\'' % (ssh_user),
                 ])
             else:
                 process_args.extend([
                     "--private-key", ssh_key_file,
-                ])
-
-            # Hack for ssh-2 server, treats as reserved words
-            if (ssh_user != "centos" and ssh2_enabled) or not ssh2_enabled:
-                process_args.extend([
-                    "--user", ssh_user
                 ])
 
             playbook_args.update({
