@@ -3038,8 +3038,9 @@ class YBBackup:
 
         # Todo: Fix the condition. Will be fixed, as part of migration of common
         # ssh_librabry(yugabyte-db/managed/devops/opscli/ybops/utils/ssh.py).
-        if (not self.args.disable_checksums) and (check_checksum_res != 'correct'
-            and (self.args.ssh2_enabled and 'correct' not in check_checksum_res)):
+        if (not self.args.disable_checksums) and \
+            (check_checksum_res != 'correct' and
+             (self.args.ssh2_enabled and 'correct' not in check_checksum_res)):
             raise BackupException('Check-sum for {} is {}'.format(
                 target_path, check_checksum_res))
 
@@ -3163,8 +3164,8 @@ class YBBackup:
                 old_db_name = self.run_ssh_cmd(cmd, self.get_main_host_ip()).strip()
 
             if self.args.ssh2_enabled:
-                 # Todo: Fix the condition. Will be fixed, as part of migration of common
-                 # ssh_librabry(yugabyte-db/managed/devops/opscli/ybops/utils/ssh.py).
+                # Todo: Fix the condition. Will be fixed, as part of migration of common
+                # ssh_librabry(yugabyte-db/managed/devops/opscli/ybops/utils/ssh.py).
                 old_db_name = old_db_name.splitlines()[-1]
 
             if old_db_name:

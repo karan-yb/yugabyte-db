@@ -120,7 +120,7 @@ class AnsibleProcess(object):
         elif self.can_ssh:
             if ssh2_enabled:
                 process_args.extend([
-                    '--ssh-common-args=\'-K%s\'' %(ssh_key_file),
+                    '--ssh-common-args=\'-K%s\'' % (ssh_key_file),
                     '--ssh-extra-args=\'-l%s\'' % (ssh_user),
                 ])
             else:
