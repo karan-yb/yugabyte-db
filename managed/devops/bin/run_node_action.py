@@ -42,7 +42,10 @@ def add_run_command_subparser(subparsers, command, parent):
 
 
 def handle_run_command(args, client):
-    output = client.exec_command(args.command, output_only=True)
+    kwargs = {}
+    if args.node_type == 'ssh':
+        kwargs['output_only'] = True
+    output = client.exec_command(args.command, **kwargs)
     print('Command output:')
     print(output)
 

@@ -2075,20 +2075,26 @@ class YBBackup:
             change_user_cmd = 'sudo -u %s' % (self.args.remote_user) \
                 if self.needs_change_user() else ''
             ssh_key_flag = '-K' if self.args.ssh2_enabled else '-i'
-            return self.run_program([
-                'ssh',
-                '-o', 'StrictHostKeyChecking=no',
+            ssh_only_args = [
                 '-o', 'UserKnownHostsFile=/dev/null',
                 # Control flags here are for ssh multiplexing (reuse the same ssh connections).
                 '-o', 'ControlMaster=auto',
                 '-o', 'ControlPath=~/.ssh/ssh-%r@%h:%p',
                 '-o', 'ControlPersist=1m',
+            ] if not self.args.ssh2_enabled else []
+            ssh_command = [
+                'ssh',
+                '-o', 'StrictHostKeyChecking=no'
+            ]
+            ssh_command.extend(ssh_only_args)
+            ssh_command.extend([
                 ssh_key_flag, ssh_key_path,
                 '-p', self.args.ssh_port,
                 '-q',
                 '%s@%s' % (self.args.ssh_user, server_ip),
-                'cd / && %s bash -c ' % (change_user_cmd) + pipes.quote(cmd)],
-                num_retry=num_retries)
+                'cd / && %s bash -c ' % (change_user_cmd) + pipes.quote(cmd)
+            ])
+            return self.run_program(ssh_command, num_retry=num_retries)
         else:
             return self.run_program(['bash', '-c', cmd])
 

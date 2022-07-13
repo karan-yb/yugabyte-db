@@ -392,8 +392,7 @@ class SSHClient(object):
                 # Need to join with spaces, but surround arguments with spaces using "'" character
                 command = ' '.join(
                     list(map(lambda part: part if ' ' not in part else "'" + part + "'", cmd)))
-            logging.info("[app] Executing command on the remote server \
-                         {}, {}".format(command, self.client))
+            logging.info("Executing command {}".format(command))
             _, stdout, stderr = self.client.exec_command(command)
             if not output_only:
                 return stdout.channel.recv_exit_status(), stdout.readlines(), stderr.readlines()
