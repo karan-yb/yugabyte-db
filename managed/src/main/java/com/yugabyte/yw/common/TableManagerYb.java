@@ -68,7 +68,6 @@ public class TableManagerYb extends DevopsBase {
 
   @Inject ReleaseManager releaseManager;
   @Inject BackupUtil backupUtil;
-  @Inject play.Configuration appConfig;
 
   public ShellResponse runCommand(CommandSubType subType, TableManagerParams taskParams)
       throws PlatformServiceException {
@@ -319,7 +318,7 @@ public class TableManagerYb extends DevopsBase {
     if (backupTableParams.disableParallelism) {
       commandArgs.add("--disable_parallelism");
     }
-    if (appConfig.getBoolean("yb.security.ssh2_enabled")) {
+    if (runtimeConfigFactory.globalRuntimeConf().getBoolean("yb.security.ssh2_enabled")) {
       commandArgs.add("--ssh2_enabled");
     }
   }

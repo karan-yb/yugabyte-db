@@ -254,11 +254,10 @@ def scp_to_tmp(filepath, host, user, port, private_key, retries=3,
     logging.info("[app] Copying local '{}' to remote '{}'".format(
         filepath, dest_path))
     ssh2_enabled = kwargs.get('ssh2_enabled', False)
-    ssh_key_flag = '-K'
-    if not ssh2_enabled:
-        ssh_key_flag = '-i'
+    ssh_key_flag = '-K' if ssh2_enabled else '-i'
+    scp = 'scpg3' if ssh2_enabled else 'scp'
     scp_cmd = [
-        "scp", ssh_key_flag, private_key, "-P", str(port), "-p",
+        scp, ssh_key_flag, private_key, "-P", str(port), "-p",
         "-o", "stricthostkeychecking=no",
         "-o", "ServerAliveInterval=30",
         "-o", "ServerAliveCountMax=20",
@@ -520,15 +519,15 @@ class SSHClient(object):
         dest_filepath = kwargs.get('dest_filepath', None)
         is_file_download = kwargs.get('get_from_remote', False)
 
-        ssh_key_flag = '-K'
-        if self.ssh_type == SSH:
-            ssh_key_flag = '-i'
+        ssh_key_flag = '-i' if self.ssh_type == SSH else '-K'
         cmd = []
 
         if not src_filepath and not dest_filepath:
-            cmd = ['ssh', '-p', str(port)]
+            cmd = ['ssh'] if self.ssh_type == SSH else ['sshg3']
+            cmd += ['-p', str(port)]
         else:
-            cmd = ['scp', '-P', str(port)]
+            cmd = ['scp'] if self.ssh_type == SSH else ['scpg3']
+            cmd += ['-P', str(port)]
 
         if len(extra_commands) != 0:
             cmd += extra_commands

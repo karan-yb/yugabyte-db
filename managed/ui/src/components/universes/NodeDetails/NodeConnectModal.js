@@ -83,7 +83,7 @@ class NodeConnectModal extends Component {
       if (!isTectiaSSHEnabled) {
         accessCommand = `sudo ssh -i ${accessKeyInfo.privateKey} -ostricthostkeychecking=no -p ${sshPort} yugabyte@${nodeIPs.privateIP}`;
       } else {
-        accessCommand = `ssh -K ${accessKeyInfo.privateKey} -ostricthostkeychecking=no -p ${sshPort} yugabyte@${nodeIPs.privateIP}`;
+        accessCommand = `sshg3 -K ${accessKeyInfo.privateKey} -ostricthostkeychecking=no -p ${sshPort} yugabyte@${nodeIPs.privateIP}`;
       }
     }
 

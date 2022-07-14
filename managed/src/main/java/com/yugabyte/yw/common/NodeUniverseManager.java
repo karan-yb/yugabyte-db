@@ -29,8 +29,6 @@ public class NodeUniverseManager extends DevopsBase {
   public static final String CERTS_DIR = "/yugabyte-tls-config";
   public static final String K8S_CERTS_DIR = "/opt/certs/yugabyte";
 
-  @Inject play.Configuration appConfig;
-
   private final KeyLock<UUID> universeLock = new KeyLock<>();
 
   @Override
@@ -241,7 +239,7 @@ public class NodeUniverseManager extends DevopsBase {
       commandArgs.add(node.cloudInfo.private_ip);
       commandArgs.add("--key");
       commandArgs.add(getAccessKey(node, universe));
-      if (appConfig.getBoolean("yb.security.ssh2_enabled")) {
+      if (runtimeConfigFactory.globalRuntimeConf().getBoolean("yb.security.ssh2_enabled")) {
         commandArgs.add("--ssh2_enabled");
       }
     } else {

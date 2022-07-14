@@ -82,6 +82,9 @@ class AnsibleProcess(object):
         ssh_key_file = vars.pop("private_key_file", None)
         ssh2_enabled = vars.pop("ssh2_enabled", False) and check_ssh2_bin_present()
         ssh_key_type = parse_private_key(ssh_key_file)
+        env = os.environ.copy()
+        if env.get('APPLICATION_CONSOLE_LOG_LEVEL') != 'INFO':
+            env['PROFILE_TASKS_TASK_OUTPUT_LIMIT'] = '30'
 
         playbook_args.update(vars)
 
@@ -91,6 +94,19 @@ class AnsibleProcess(object):
                 "yb_server_ssh_user": ssh_user,
                 "ssh_type": SSH if ssh_key_type == SSH else SSH2
             })
+
+        if ssh2_enabled:
+            # Will be moved as part of task of license upload api.
+            configure_ssh2_args = [
+                "ansible-playbook", os.path.join(ybutils.YB_DEVOPS_HOME, "configure_ssh2.yml")
+            ]
+            p = subprocess.Popen(configure_ssh2_args,
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE,
+                                 env=env)
+            stdout, stderr = p.communicate()
+            if p.returncode != 0:
+                raise YBOpsRuntimeError("Failed to configure ssh2 on the platform")
 
         playbook_args["yb_home_dir"] = ybutils.YB_HOME_DIR
 
@@ -152,9 +168,6 @@ class AnsibleProcess(object):
         process_args.extend(["--extra-vars", json.dumps(playbook_args)])
         redacted_process_args.extend(
             ["--extra-vars", json.dumps(self.redact_sensitive_data(playbook_args))])
-        env = os.environ.copy()
-        if env.get('APPLICATION_CONSOLE_LOG_LEVEL') != 'INFO':
-            env['PROFILE_TASKS_TASK_OUTPUT_LIMIT'] = '30'
         logging.info("[app] Running ansible playbook {} against target {}".format(
                         filename, inventory_target))
 

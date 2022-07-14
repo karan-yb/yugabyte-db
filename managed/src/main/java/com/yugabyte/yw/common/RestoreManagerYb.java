@@ -34,8 +34,6 @@ import play.libs.Json;
 @Slf4j
 public class RestoreManagerYb extends DevopsBase {
 
-  @Inject play.Configuration appConfig;
-
   private static final int BACKUP_PREFIX_LENGTH = 8;
   private static final int TS_FMT_LENGTH = 19;
   private static final int UNIV_PREFIX_LENGTH = 6;
@@ -111,7 +109,7 @@ public class RestoreManagerYb extends DevopsBase {
       commandArgs.add(Json.stringify(Json.toJson(secondaryToPrimaryIP)));
     }
 
-    if (appConfig.getBoolean("yb.security.ssh2_enabled")) {
+    if (runtimeConfigFactory.globalRuntimeConf().getBoolean("yb.security.ssh2_enabled")) {
       commandArgs.add("--ssh2_enabled");
     }
 

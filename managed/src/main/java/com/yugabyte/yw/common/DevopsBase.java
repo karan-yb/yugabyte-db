@@ -119,7 +119,7 @@ public abstract class DevopsBase {
       region = Region.get(regionUUID);
     }
 
-    if (appConfig.getBoolean("yb.security.ssh2_enabled")) {
+    if (runtimeConfigFactory.globalRuntimeConf().getBoolean("yb.security.ssh2_enabled")) {
       commandArgs.add("--ssh2_enabled");
     }
 
