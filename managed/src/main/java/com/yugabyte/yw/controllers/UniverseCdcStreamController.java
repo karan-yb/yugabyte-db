@@ -49,8 +49,9 @@ public class UniverseCdcStreamController extends AuthenticatedController {
     YBClient client = null;
     try {
       client = ybClientService.getClient(masterAddresses, certificate);
+      LOG.error("Got client");
 
-      ListCDCStreamsResponse response = client.listCDCStreams("", "", IdTypePB.TABLE_ID);
+      ListCDCStreamsResponse response = client.listCDCStreams(null, null, IdTypePB.TABLE_ID);
       return PlatformResults.withData(response);
     } catch (Exception e) {
       LOG.error("Error while querying CDC streams: ", e);
@@ -78,7 +79,7 @@ public class UniverseCdcStreamController extends AuthenticatedController {
       client = ybClientService.getClient(masterAddresses, certificate);
 
       List<HostAndPort> hps = NetUtil.parseStrings(masterAddresses, 7100);
-      CreateCDCStreamResponse response = client.createCDCStream(hps.get(0), "", "ysql.yugabyte", "JSON", "CHANGE");
+      CreateCDCStreamResponse response = client.createCDCStream(hps.get(0), null, "yugabyte", "PROTO", "CHANGE");
 
       return PlatformResults.withData(response);
     } catch (Exception e) {

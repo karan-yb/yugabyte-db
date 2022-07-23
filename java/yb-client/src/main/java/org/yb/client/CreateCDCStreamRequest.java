@@ -30,6 +30,7 @@ public class CreateCDCStreamRequest extends YRpc<CreateCDCStreamResponse> {
   private final CdcService.CDCRequestSource source_type;
   private final CdcService.CDCRecordFormat record_format;
   private final CdcService.CDCCheckpointType checkpoint_type;
+  private final CdcService.CDCRecordType record_type;
 
   public CreateCDCStreamRequest(YBTable masterTable, String tableId,
                                 String namespaceName, String format,
@@ -49,6 +50,7 @@ public class CreateCDCStreamRequest extends YRpc<CreateCDCStreamResponse> {
     else {
       this.checkpoint_type = CdcService.CDCCheckpointType.IMPLICIT;
     }
+    this.record_type = CdcService.CDCRecordType.CHANGE;
   }
 
   @Override
@@ -61,6 +63,7 @@ public class CreateCDCStreamRequest extends YRpc<CreateCDCStreamResponse> {
     builder.setSourceType(this.source_type);
     builder.setRecordFormat(this.record_format);
     builder.setCheckpointType(this.checkpoint_type);
+    builder.setRecordType(this.record_type);
     return toChannelBuffer(header, builder.build());
   }
 
