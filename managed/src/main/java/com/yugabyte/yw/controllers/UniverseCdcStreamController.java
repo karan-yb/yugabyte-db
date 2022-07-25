@@ -13,12 +13,13 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.yb.client.CreateCDCStreamResponse;
-import org.yb.client.ListCDCStreamsResponse;
-import org.yb.client.YBClient;
+import org.yb.client.*;
+import org.yb.master.MasterDdlOuterClass;
 import org.yb.master.MasterReplicationOuterClass.IdTypePB;
 import org.yb.util.NetUtil;
 import play.mvc.Result;
+
+import javax.persistence.Table;
 
 public class UniverseCdcStreamController extends AuthenticatedController {
   private static final Logger LOG = LoggerFactory.getLogger(UniverseCdcStreamController.class);
@@ -51,7 +52,7 @@ public class UniverseCdcStreamController extends AuthenticatedController {
       client = ybClientService.getClient(masterAddresses, certificate);
       LOG.error("Got client");
 
-      ListCDCStreamsResponse response = client.listCDCStreams(null, null, IdTypePB.TABLE_ID);
+      ListCDCStreamsResponse response = client.listCDCStreams(null, null, IdTypePB.NAMESPACE_ID);
       return PlatformResults.withData(response);
     } catch (Exception e) {
       LOG.error("Error while querying CDC streams: ", e);
@@ -59,6 +60,22 @@ public class UniverseCdcStreamController extends AuthenticatedController {
     } finally {
       ybClientService.closeClient(client, masterAddresses);
     }
+  }
+
+  private YBTable getFirstTable(YBClient client) throws Exception {
+    ListTablesResponse tablesResp = client.getTablesList();
+
+    String tid = "";
+
+    for (MasterDdlOuterClass.ListTablesResponsePB.TableInfo tableInfo :
+      tablesResp.getTableInfoList()) {
+      LOG.error("TABLE: {} - {} ", tableInfo.getNamespace().getName(), tableInfo.getName());
+      if (tableInfo.getNamespace().getName().equals("yugabyte")) {
+        tid = tableInfo.getId().toStringUtf8();
+      }
+    }
+
+    return client.openTableByUUID(tid);
   }
 
   @ApiOperation(
@@ -78,8 +95,13 @@ public class UniverseCdcStreamController extends AuthenticatedController {
     try {
       client = ybClientService.getClient(masterAddresses, certificate);
 
-      List<HostAndPort> hps = NetUtil.parseStrings(masterAddresses, 7100);
-      CreateCDCStreamResponse response = client.createCDCStream(hps.get(0), null, "yugabyte", "PROTO", "CHANGE");
+      YBTable table = getFirstTable(client);
+
+      CreateCDCStreamResponse response = client.createCDCStream(table, "yugabyte", "PROTO", "IMPLICIT");
+
+      // DOES NOT work
+      //List<HostAndPort> hps = NetUtil.parseStrings(masterAddresses, 7100);
+      //CreateCDCStreamResponse response = client.createCDCStream(hps.get(0), null, "yugabyte", "PROTO", "CHANGE");
 
       return PlatformResults.withData(response);
     } catch (Exception e) {
