@@ -3,14 +3,21 @@ package com.yugabyte.yw.controllers;
 import com.google.common.net.HostAndPort;
 import com.google.inject.Inject;
 import com.yugabyte.yw.common.PlatformServiceException;
+import com.yugabyte.yw.common.cdc.CdcStream;
+import com.yugabyte.yw.common.cdc.CdcStreamCreateResponse;
+import com.yugabyte.yw.common.cdc.CdcStreamDeleteResponse;
+import com.yugabyte.yw.common.cdc.CdcStreamManager;
 import com.yugabyte.yw.common.config.RuntimeConfigFactory;
 import com.yugabyte.yw.common.services.YBClientService;
 import com.yugabyte.yw.forms.PlatformResults;
 import com.yugabyte.yw.models.Customer;
 import com.yugabyte.yw.models.Universe;
 import io.swagger.annotations.ApiOperation;
+
+import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yb.client.*;
@@ -24,92 +31,43 @@ import javax.persistence.Table;
 public class UniverseCdcStreamController extends AuthenticatedController {
   private static final Logger LOG = LoggerFactory.getLogger(UniverseCdcStreamController.class);
 
-  @Inject private RuntimeConfigFactory runtimeConfigFactory;
-  @Inject private YBClientService ybClientService;
+  @Inject
+  private RuntimeConfigFactory runtimeConfigFactory;
+  @Inject
+  private CdcStreamManager cdcStreamManager;
 
-  public void checkCloud() {
+  public Universe checkCloudAndValidateUniverse(UUID customerUUID, UUID universeUUID) {
     if (!runtimeConfigFactory.globalRuntimeConf().getBoolean("yb.cloud.enabled")) {
-      throw new PlatformServiceException(
-        METHOD_NOT_ALLOWED, "CDC Stream management is not available.");
+      throw new PlatformServiceException(METHOD_NOT_ALLOWED, "CDC Stream management is not available.");
     }
-  }
-
-  @ApiOperation(
-    value = "List CDC Streams for a cluster",
-    notes = "List CDC Streams for a cluster"
-  )
-  public Result listCdcStreams(UUID customerUUID, UUID universeUUID) {
-    checkCloud();
 
     Customer customer = Customer.getOrBadRequest(customerUUID);
-    Universe universe = Universe.getValidUniverseOrBadRequest(universeUUID, customer);
-
-    String masterAddresses = universe.getMasterAddresses();
-    String certificate = universe.getCertificateNodetoNode();
-
-    YBClient client = null;
-    try {
-      client = ybClientService.getClient(masterAddresses, certificate);
-      LOG.error("Got client");
-
-      ListCDCStreamsResponse response = client.listCDCStreams(null, null, IdTypePB.NAMESPACE_ID);
-      return PlatformResults.withData(response);
-    } catch (Exception e) {
-      LOG.error("Error while querying CDC streams: ", e);
-      throw new RuntimeException(e);
-    } finally {
-      ybClientService.closeClient(client, masterAddresses);
-    }
+    return Universe.getValidUniverseOrBadRequest(universeUUID, customer);
   }
 
-  private YBTable getFirstTable(YBClient client) throws Exception {
-    ListTablesResponse tablesResp = client.getTablesList();
+  @ApiOperation(value = "List CDC Streams for a cluster", notes = "List CDC Streams for a cluster")
+  public Result listCdcStreams(UUID customerUUID, UUID universeUUID) throws Exception {
+    Universe universe = checkCloudAndValidateUniverse(customerUUID, universeUUID);
 
-    String tid = "";
-
-    for (MasterDdlOuterClass.ListTablesResponsePB.TableInfo tableInfo :
-      tablesResp.getTableInfoList()) {
-      LOG.error("TABLE: {} - {} ", tableInfo.getNamespace().getName(), tableInfo.getName());
-      if (tableInfo.getNamespace().getName().equals("yugabyte")) {
-        tid = tableInfo.getId().toStringUtf8();
-      }
-    }
-
-    return client.openTableByUUID(tid);
+    List<CdcStream> response = cdcStreamManager.getAllCdcStreams(universe);
+    return PlatformResults.withData(response);
   }
 
-  @ApiOperation(
-    value = "Create CDC Stream for a cluster",
-    notes = "Create CDC Stream for a cluster"
-  )
-  public Result createCdcStream(UUID customerUUID, UUID universeUUID) {
-    checkCloud();
+  @ApiOperation(value = "Create CDC Stream for a cluster", notes = "Create CDC Stream for a cluster")
+  public Result createCdcStream(UUID customerUUID, UUID universeUUID) throws Exception {
+    Universe universe = checkCloudAndValidateUniverse(customerUUID, universeUUID);
 
-    Customer customer = Customer.getOrBadRequest(customerUUID);
-    Universe universe = Universe.getValidUniverseOrBadRequest(universeUUID, customer);
+    CdcStreamCreateResponse response = cdcStreamManager.createCdcStream(universe, "yugabyte");
+    return PlatformResults.withData(response);
+  }
 
-    String masterAddresses = universe.getMasterAddresses();
-    String certificate = universe.getCertificateNodetoNode();
 
-    YBClient client = null;
-    try {
-      client = ybClientService.getClient(masterAddresses, certificate);
+  @ApiOperation(value = "Delete a CDC stream for a cluster", notes = "Delete a CDC Stream for a cluster")
+  public Result deleteCdcStream(UUID customerUUID, UUID universeUUID, String streamId) throws Exception {
+    Universe universe = checkCloudAndValidateUniverse(customerUUID, universeUUID);
 
-      YBTable table = getFirstTable(client);
-
-      CreateCDCStreamResponse response = client.createCDCStream(table, "yugabyte", "PROTO", "IMPLICIT");
-
-      // DOES NOT work
-      //List<HostAndPort> hps = NetUtil.parseStrings(masterAddresses, 7100);
-      //CreateCDCStreamResponse response = client.createCDCStream(hps.get(0), null, "yugabyte", "PROTO", "CHANGE");
-
-      return PlatformResults.withData(response);
-    } catch (Exception e) {
-      LOG.error("Error while querying CDC streams: ", e);
-      throw new RuntimeException(e);
-    } finally {
-      ybClientService.closeClient(client, masterAddresses);
-    }
+    CdcStreamDeleteResponse response = cdcStreamManager.deleteCdcStream(universe, streamId);
+    return PlatformResults.withData(response);
   }
 
 }
